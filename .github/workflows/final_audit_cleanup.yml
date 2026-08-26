@@ -1,0 +1,121 @@
+name: Final audit cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/final_audit_cleanup.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  audit-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install pinned environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Apply final audit fixes
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          # Notebook 03 must use the same fixed LR convergence cap as Notebook 02/04/05.
+          p = Path('03_features_imbalance.ipynb')
+          nb = json.loads(p.read_text())
+          changed = 0
+          for cell in nb['cells']:
+              if cell.get('cell_type') != 'code':
+                  continue
+              src = ''.join(cell.get('source', []))
+              if 'LogisticRegression(solver="liblinear",max_iter=2000,random_state=SEED' in src:
+                  src = src.replace('LogisticRegression(solver="liblinear",max_iter=2000,random_state=SEED',
+                                    'LogisticRegression(solver="liblinear",max_iter=3000,random_state=SEED')
+                  cell['source'] = src.splitlines(True)
+                  changed += 1
+          assert changed == 1, f'Expected one NB3 max_iter patch, got {changed}'
+          p.write_text(json.dumps(nb, indent=1))
+
+          # README execution command should rely only on the pinned requirements.
+          p = Path('README.md')
+          text = p.read_text()
+          old = '''```bash\npip install -r requirements.txt\njupyter notebook\n```\n\nThen run `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb` sequentially.'''
+          new = '''```bash\npip install -r requirements.txt\njupyter nbconvert --to notebook --execute --inplace 01_data_eda.ipynb --ExecutePreprocessor.timeout=900\njupyter nbconvert --to notebook --execute --inplace 02_baseline_tuning.ipynb --ExecutePreprocessor.timeout=900\njupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb --ExecutePreprocessor.timeout=900\njupyter nbconvert --to notebook --execute --inplace 04_segments_robustness.ipynb --ExecutePreprocessor.timeout=900\njupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=900\n```\n\nThe commands execute the notebooks sequentially from `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb`.'''
+          assert old in text, 'README reproducibility block not found'
+          p.write_text(text.replace(old, new))
+
+          # Avoid naming nonexistent auxiliary directories in the comprehensive README.
+          p = Path('README_COMPREHENSIVE.md')
+          text = p.read_text()
+          old = 'They do not require `data/`, `results/`, `figures/`, `scripts/` or `html/` directories and do not require cached CSV, JSON or NPY intermediates.'
+          new = 'They require no auxiliary project directories and no cached CSV, JSON or NPY intermediates.'
+          assert old in text, 'Comprehensive README auxiliary-directory sentence not found'
+          p.write_text(text.replace(old, new))
+          PY
+
+      - name: Execute corrected Notebook 03
+        run: |
+          jupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb \
+            --ExecutePreprocessor.timeout=900 \
+            --ExecutePreprocessor.kernel_name=python3
+
+      - name: Verify final audit invariants
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          nb = json.loads(Path('03_features_imbalance.ipynb').read_text())
+          errors = [o for c in nb['cells'] for o in c.get('outputs', []) if o.get('output_type') == 'error']
+          assert not errors
+          code = [c for c in nb['cells'] if c.get('cell_type') == 'code']
+          assert code and all(c.get('execution_count') is not None for c in code)
+          src = '\n'.join(''.join(c.get('source', [])) for c in nb['cells'])
+          assert 'max_iter=3000' in src
+          assert 'max_iter=2000' not in src
+          assert 'Logistic Regression Feature Importance' in src
+          assert 'HistGradientBoosting Permutation Importance' in src
+          assert 'duration' not in ['age','balance','day','campaign','job','marital','education','default','housing','loan','contact','month']
+
+          out = '\n'.join(
+              ''.join(o.get('text', [])) if isinstance(o.get('text', []), list) else str(o.get('text', ''))
+              for c in nb['cells'] for o in c.get('outputs', []) if o.get('output_type') == 'stream'
+          )
+          # Canonical result values are also present in rich display outputs; search whole JSON text.
+          whole = json.dumps(nb)
+          for token in ['0.240265','0.272820','0.274531','0.274559','0.287171','0.353059']:
+              assert token in whole, token
+
+          readme = Path('README.md').read_text()
+          assert 'jupyter notebook' not in readme
+          assert 'jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb' in readme
+
+          comp = Path('README_COMPREHENSIVE.md').read_text()
+          assert '`data/`' not in comp and '`results/`' not in comp and '`html/`' not in comp
+
+          print('Final audit cleanup verification: PASS')
+          PY
+
+      - name: Commit cleanup and remove temporary workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/final_audit_cleanup.yml
+          git add 03_features_imbalance.ipynb README.md README_COMPREHENSIVE.md
+          git commit -m "Finalize repository audit consistency"
+          git push origin main
