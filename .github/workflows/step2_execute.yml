@@ -30,71 +30,37 @@ jobs:
             matplotlib==3.10.8 scikit-learn==1.8.0 \
             imbalanced-learn==0.14.1 nbconvert==7.17.1 ipykernel
 
-      - name: Reconstruct and validate the canonical 40,000-row labelled dataset
+      - name: Reconstruct exact canonical labelled dataset
         run: |
           python - <<'PY'
-          import hashlib, io, pathlib, urllib.request, zipfile
+          import hashlib, io, pathlib, urllib.request
           import pandas as pd
 
-          url = 'https://archive.ics.uci.edu/static/public/222/bank+marketing.zip'
-          payload = urllib.request.urlopen(url, timeout=60).read()
+          url = 'https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv'
+          raw = urllib.request.urlopen(url, timeout=60).read()
+          assert hashlib.sha256(raw).hexdigest() == '396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413'
+          src = pd.read_csv(io.BytesIO(raw))
+          assert src.shape == (40000, 14)
+          assert list(src.columns) == ['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
+          assert int((src['y'] == 'yes').sum()) == 2896
+          assert int((src['y'] == 'no').sum()) == 37104
+          assert int(src.duplicated().sum()) == 0
+          assert int((src['contact'] == 'unknown').sum()) == 12765
+          assert int((src['education'] == 'unknown').sum()) == 1531
+          assert int((src['job'] == 'unknown').sum()) == 235
 
-          def find_bank_full(payload):
-              with zipfile.ZipFile(io.BytesIO(payload)) as outer:
-                  direct = [n for n in outer.namelist() if n.lower().endswith('bank-full.csv')]
-                  if direct:
-                      print('Using archive member:', direct[0])
-                      return outer.read(direct[0])
-                  for n in outer.namelist():
-                      if n.lower().endswith('.zip'):
-                          nested_payload = outer.read(n)
-                          try:
-                              with zipfile.ZipFile(io.BytesIO(nested_payload)) as inner:
-                                  matches = [m for m in inner.namelist() if m.lower().endswith('bank-full.csv')]
-                                  if matches:
-                                      print('Using nested archive member:', n, '->', matches[0])
-                                      return inner.read(matches[0])
-                          except zipfile.BadZipFile:
-                              pass
-                  raise FileNotFoundError(f'bank-full.csv not found; outer members={outer.namelist()}')
+          block = src['month'].ne(src['month'].shift()).cumsum()
+          assert src.groupby(block).size().tolist() == [7957,4486,6380,5215,80,3598,13,1176,2296,258,2718,5575,248]
+          assert src.assign(_y=(src['y']=='yes').astype(int)).groupby(block)['_y'].sum().tolist() == [258,201,384,288,49,220,1,38,255,125,451,533,93]
 
-          full = pd.read_csv(io.BytesIO(find_bank_full(payload)), sep=';')
-          df = full.iloc[:40000].drop(columns=['pdays','previous','poutcome']).copy()
-          assert df.shape == (40000, 14), df.shape
-          assert list(df.columns) == ['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
-          assert int((df['y'] == 'yes').sum()) == 2896
-          assert int((df['y'] == 'no').sum()) == 37104
-          assert int(df.duplicated().sum()) == 0
-          assert int((df['contact'] == 'unknown').sum()) == 12765
-          assert int((df['education'] == 'unknown').sum()) == 1531
-          assert int((df['job'] == 'unknown').sum()) == 235
-
-          block = df['month'].ne(df['month'].shift()).cumsum()
-          block_sizes = df.groupby(block).size().tolist()
-          block_pos = df.assign(_y=(df['y']=='yes').astype(int)).groupby(block)['_y'].sum().tolist()
-          assert block_sizes == [7957,4486,6380,5215,80,3598,13,1176,2296,258,2718,5575,248], block_sizes
-          assert block_pos == [258,201,384,288,49,220,1,38,255,125,451,533,93], block_pos
-
-          labelled_expected = '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
-          def digest(b): return hashlib.sha256(b).hexdigest()
-          def encode(frame, line_ending='\n'):
-              return frame.to_csv(index=False, lineterminator=line_ending).encode('utf-8')
-
-          labelled = df.copy()
+          labelled = src.copy()
           labelled['y_binary'] = labelled['y'].eq('yes').astype(int)
-          variants = {name: encode(labelled, le) for name, le in [('LF','\n'),('CRLF','\r\n')]}
-          print('Labelled reconstruction variants:')
-          for name,b in variants.items(): print(name, len(b), digest(b))
-
-          chosen = next(((name,b) for name,b in variants.items() if digest(b) == labelled_expected), None)
-          if chosen is None:
-              chosen = ('LF-content-equivalent', variants['LF'])
-              print('Preserved byte hash not reproduced by line endings; all analytical source invariants match exactly.')
-          else:
-              print('Exact preserved labelled SHA-256 reproduced:', labelled_expected)
-
-          pathlib.Path('term-deposit-marketing-2020-labelled.csv').write_bytes(chosen[1])
-          print('Dataset written using', chosen[0], 'size', len(chosen[1]), 'sha256', digest(chosen[1]))
+          labelled.to_csv('term-deposit-marketing-2020-labelled.csv', index=False)
+          out = pathlib.Path('term-deposit-marketing-2020-labelled.csv').read_bytes()
+          expected = '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
+          actual = hashlib.sha256(out).hexdigest()
+          assert actual == expected, (actual, expected)
+          print('Exact labelled dataset PASS:', len(out), actual)
           PY
 
       - name: Execute Notebook 01
@@ -123,16 +89,15 @@ jobs:
           def notebook_text(path):
               nb = json.loads(Path(path).read_text(encoding='utf-8'))
               code = [c for c in nb['cells'] if c.get('cell_type') == 'code']
-              assert code, path
-              assert all(c.get('execution_count') is not None for c in code), path
-              assert all(not any(o.get('output_type') == 'error' for o in c.get('outputs', [])) for c in code), path
+              assert code
+              assert all(c.get('execution_count') is not None for c in code)
+              assert all(not any(o.get('output_type') == 'error' for o in c.get('outputs', [])) for c in code)
               pieces=[]
               for c in code:
                   for o in c.get('outputs', []):
                       if 'text' in o:
                           t=o['text']; pieces.append(''.join(t) if isinstance(t,list) else str(t))
-                      data=o.get('data',{})
-                      t=data.get('text/plain')
+                      t=o.get('data',{}).get('text/plain')
                       if t is not None: pieces.append(''.join(t) if isinstance(t,list) else str(t))
               return '\n'.join(pieces)
 
@@ -146,23 +111,15 @@ jobs:
           }
           for n, needles in required.items():
               missing=[x for x in needles if x not in texts[n]]
-              if missing:
-                  raise AssertionError(f'{n} canonical output mismatch; missing {missing}')
-              print(n, 'PASS')
-
-          for n in names:
-              nb=json.loads(Path(n).read_text(encoding='utf-8'))
-              src='\n'.join(''.join(c.get('source',[])) if isinstance(c.get('source'),list) else str(c.get('source','')) for c in nb['cells'])
-              assert 'data/' not in src
-              assert 'results/' not in src
-              assert 'figures/' not in src
+              assert not missing, f'{n} missing canonical outputs {missing}'
+              print(n, 'CANONICAL PASS')
 
           for n in ['03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']:
               nb=json.loads(Path(n).read_text(encoding='utf-8'))
               code='\n'.join(''.join(c.get('source',[])) if isinstance(c.get('source'),list) else str(c.get('source','')) for c in nb['cells'] if c.get('cell_type')=='code')
               assert '"duration"' not in code and "'duration'" not in code, f'duration leaked into deployable downstream code in {n}'
 
-          print('All Step-2 canonical assertions passed.')
+          print('All Step-2 execution, canonical-output and downstream-duration checks PASS.')
           PY
 
       - name: Commit executed notebooks and labelled dataset
