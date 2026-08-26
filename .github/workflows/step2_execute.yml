@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install execution environment
+      - name: Install verified environment
         run: |
           python -m pip install --upgrade pip
           python -m pip install \
@@ -78,30 +78,37 @@ jobs:
       - name: Execute Notebook 05
         run: jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
 
-      - name: Verify canonical results and notebook outputs
+      - name: Verify canonical results and notebook structure
         run: |
           python - <<'PY'
-          import json
+          import json, re
           from pathlib import Path
 
-          names = ['01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']
+          names = [
+              '01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb',
+              '04_segments_robustness.ipynb','05_final_validation_reporting.ipynb'
+          ]
 
-          def notebook_text(path):
-              nb = json.loads(Path(path).read_text(encoding='utf-8'))
-              code = [c for c in nb['cells'] if c.get('cell_type') == 'code']
-              assert code
-              assert all(c.get('execution_count') is not None for c in code)
-              assert all(not any(o.get('output_type') == 'error' for o in c.get('outputs', [])) for c in code)
+          def src_text(cell):
+              s = cell.get('source', [])
+              return ''.join(s) if isinstance(s, list) else str(s)
+
+          def output_text(nb):
               pieces=[]
-              for c in code:
+              for c in nb['cells']:
+                  if c.get('cell_type') != 'code':
+                      continue
                   for o in c.get('outputs', []):
                       if 'text' in o:
                           t=o['text']; pieces.append(''.join(t) if isinstance(t,list) else str(t))
                       t=o.get('data',{}).get('text/plain')
-                      if t is not None: pieces.append(''.join(t) if isinstance(t,list) else str(t))
+                      if t is not None:
+                          pieces.append(''.join(t) if isinstance(t,list) else str(t))
               return '\n'.join(pieces)
 
-          texts={n:notebook_text(n) for n in names}
+          notebooks={n:json.loads(Path(n).read_text(encoding='utf-8')) for n in names}
+          texts={n:output_text(nb) for n,nb in notebooks.items()}
+
           required = {
             '01_data_eda.ipynb': ['Exact duplicate rows: 0','0.4612','6774'],
             '02_baseline_tuning.ipynb': ['8.483428982440726','0.0610540229658533','0.240265','0.272820','0.943115'],
@@ -109,17 +116,31 @@ jobs:
             '04_segments_robustness.ipynb': ['0.566290','0.551600','0.112626','0.096333'],
             '05_final_validation_reporting.ipynb': ['1.853857','1.606389','1.401474','0.035101','0.044442']
           }
-          for n, needles in required.items():
-              missing=[x for x in needles if x not in texts[n]]
+
+          for n, nb in notebooks.items():
+              kinds=[c.get('cell_type') for c in nb['cells']]
+              code=[c for c in nb['cells'] if c.get('cell_type')=='code']
+              assert 'markdown' in kinds and code, n
+              assert all(c.get('execution_count') is not None for c in code), n
+              assert all(not any(o.get('output_type')=='error' for o in c.get('outputs',[])) for c in code), n
+              assert all(not (kinds[i]=='code' and kinds[i+1]=='code') for i in range(len(kinds)-1)), f'unexplained code gap in {n}'
+              source='\n'.join(src_text(c) for c in nb['cells'])
+              assert '/mnt/data/' not in source, n
+              assert 'term-deposit-marketing-2020-labelled.csv' in source, n
+              missing=[x for x in required[n] if x not in texts[n]]
               assert not missing, f'{n} missing canonical outputs {missing}'
-              print(n, 'CANONICAL PASS')
+              print(n, 'STRUCTURE + CANONICAL OUTPUT PASS')
 
+          # Downstream deployable feature definitions must exclude duration.
           for n in ['03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']:
-              nb=json.loads(Path(n).read_text(encoding='utf-8'))
-              code='\n'.join(''.join(c.get('source',[])) if isinstance(c.get('source'),list) else str(c.get('source','')) for c in nb['cells'] if c.get('cell_type')=='code')
-              assert '"duration"' not in code and "'duration'" not in code, f'duration leaked into deployable downstream code in {n}'
+              code='\n'.join(src_text(c) for c in notebooks[n]['cells'] if c.get('cell_type')=='code')
+              feature_lines=[ln.strip() for ln in code.splitlines() if re.match(r'^(NUM|NUM_PRE|CAT|PRE)\s*=', ln.strip())]
+              assert feature_lines, f'feature definitions not found in {n}'
+              bad=[ln for ln in feature_lines if 'duration' in ln.lower()]
+              assert not bad, f'duration in deployable feature definition {n}: {bad}'
+              print(n, 'DEPLOYABLE DURATION EXCLUSION PASS')
 
-          print('All Step-2 execution, canonical-output and downstream-duration checks PASS.')
+          print('ALL STEP-2 CHECKS PASS')
           PY
 
       - name: Commit executed notebooks and labelled dataset
