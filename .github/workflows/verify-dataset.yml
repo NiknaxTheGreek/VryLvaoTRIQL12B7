@@ -14,39 +14,34 @@ jobs:
           python-version: '3.12'
       - name: Install pandas
         run: pip install pandas
-      - name: Reconstruct and verify Apziva dataset
+      - name: Download and verify exact Apziva dataset
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/bank
-          curl -L --fail --retry 3 'https://archive.ics.uci.edu/static/public/222/bank+marketing.zip' -o /tmp/bank.zip
-          unzip -q /tmp/bank.zip -d /tmp/bank
-          find /tmp/bank -maxdepth 3 -type f -print
+          mkdir -p data
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/afolga/apziva_ai_residency/611c4bad71b4727f5c9fd2b4ad5e735faa21059c/project2/data/term-deposit-marketing-2020.csv' -o data/term-deposit-marketing-2020.csv
           python - <<'PY'
           from pathlib import Path
           import hashlib
           import pandas as pd
 
-          candidates=list(Path('/tmp/bank').rglob('bank-full.csv'))
-          assert candidates, 'bank-full.csv not found'
-          src=candidates[0]
-          full=pd.read_csv(src, sep=';')
-          df=full.iloc[:40000].drop(columns=['pdays','previous','poutcome']).copy()
-          print('full shape', full.shape)
-          print('candidate shape', df.shape)
+          src=Path('data/term-deposit-marketing-2020.csv')
+          df=pd.read_csv(src)
+          digest=hashlib.sha256(src.read_bytes()).hexdigest()
+          print('file_size', src.stat().st_size)
+          print('sha256', digest)
+          print('shape', df.shape)
           print('columns', list(df.columns))
           print('yes', int((df.y=='yes').sum()), 'no', int((df.y=='no').sum()))
+          print('positive_rate', float((df.y=='yes').mean()))
           for col in ['contact','education','job']:
               print('unknown', col, int((df[col]=='unknown').sum()))
           print('duplicates', int(df.duplicated().sum()))
           print('nulls', int(df.isna().sum().sum()))
-          print('last5')
-          print(df.tail().to_string(index=True))
-          out=Path('/tmp/term-deposit-marketing-2020.csv')
-          df.to_csv(out, index=False)
-          print('sha256', hashlib.sha256(out.read_bytes()).hexdigest())
           assert df.shape == (40000,14)
+          assert list(df.columns) == ['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
           assert int((df.y=='yes').sum()) == 2896
+          assert int((df.y=='no').sum()) == 37104
           assert int((df.contact=='unknown').sum()) == 12765
           assert int((df.education=='unknown').sum()) == 1531
           assert int((df.job=='unknown').sum()) == 235
