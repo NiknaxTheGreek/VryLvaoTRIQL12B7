@@ -96,10 +96,15 @@ jobs:
               assert 'term-deposit-marketing-2020-labelled.csv' in '\n'.join(st(c) for c in nb['cells']),n
               print(n,'EXECUTION/STRUCTURE PASS')
 
-          # Exact selected hyperparameters must reproduce.
+          # Exact selected hyperparameters, with display whitespace ignored.
           t2=texts['02_baseline_tuning.ipynb']
-          for token in ['8.483428982440726','0.0610540229658533','"max_depth": 8','"learning_rate": 0.05','"max_leaf_nodes": 15','"min_samples_leaf": 20']:
-              assert token in t2,f'NB2 selected parameter missing: {token}'
+          patterns=[
+              r'8\.483428982440726', r'0\.0610540229658533',
+              r'["\']max_depth["\']\s*:\s*8', r'["\']learning_rate["\']\s*:\s*0\.05',
+              r'["\']max_leaf_nodes["\']\s*:\s*15', r'["\']min_samples_leaf["\']\s*:\s*20'
+          ]
+          for pat in patterns:
+              assert re.search(pat,t2),f'NB2 selected parameter pattern missing: {pat}'
           print('NB2 HYPERPARAMETERS PASS')
 
           # Numerical canonical checks allow only tiny floating-point/runner jitter.
@@ -114,6 +119,7 @@ jobs:
               got=numbers(texts[n])
               for e in vals:
                   d=min((abs(x-e) for x in got),default=999)
+                  print(n,'expected',e,'nearest_diff',d)
                   assert d<=5e-6,f'{n}: canonical {e} not reproduced; nearest diff={d}'
               print(n,'CANONICAL NUMBERS PASS')
 
