@@ -92,22 +92,31 @@ Four searches are run separately:
 
 Hyperparameter selection uses PR-AUC as the primary validation metric and ROC-AUC as the tie-break. The untouched final holdout is not used to choose hyperparameters.
 
-### Step 4 — Class-imbalance experiments on tuned pre-call models
+### Step 4 — Class-imbalance and threshold experiments on tuned pre-call models
 
-The selected tuned pre-call model structures are held fixed while the following six imbalance strategies are compared:
+The selected tuned pre-call model structures are held fixed while six approaches are compared:
 
-1. unweighted;
+1. no adjustment / unweighted;
 2. class weighting;
-3. random undersampling;
-4. random oversampling;
-5. combined random over- and undersampling;
-6. SMOTENC.
+3. random oversampling;
+4. random undersampling;
+5. SMOTENC;
+6. nested threshold optimisation.
 
-The structural hyperparameters are not retuned inside each imbalance arm. Threshold optimisation is a separate nested threshold-selection analysis rather than one of the six resampling/weighting strategies.
+The structural hyperparameters are not retuned inside these arms. Class weighting, oversampling, undersampling and SMOTENC alter fitting or the training distribution; threshold optimisation is different because it leaves the score ordering unchanged and selects a decision cutoff from inner out-of-fold predictions. It is therefore one of the six evaluated imbalance/operating-point approaches, but it is not a resampling strategy.
 
 ### Step 5 — Feature reduction
 
-Feature evidence is combined to define Top-3, Top-4 and Top-5 subsets. The already selected full-model hyperparameters are transferred unchanged to those reduced predictor sets; the reduced models are not retuned. The comparison therefore tests whether fewer predictors preserve ranking performance rather than giving reduced models an additional tuning advantage.
+The reduced feature sets are selected directly from the HistGradientBoosting permutation-importance ranking measured by PR-AUC decrease on a stratified holdout:
+
+- Top 3: `month`, `contact`, `day`;
+- Top 4: `month`, `contact`, `day`, `housing`;
+- Top 5: `month`, `contact`, `day`, `housing`, `age`;
+- All 12: every valid pre-call predictor.
+
+Pearson correlations, Cramér's V and Logistic Regression grouped coefficients are supporting interpretation only; they were not combined into a formal ranking to choose the tested subsets.
+
+The already selected full-model hyperparameters are transferred unchanged to those reduced predictor sets; the reduced models are not retuned. The comparison therefore tests whether fewer predictors preserve ranking performance rather than giving reduced models an additional tuning advantage.
 
 ### Step 6 — Exploratory higher-conversion population
 
@@ -219,23 +228,101 @@ The number 320 refers to candidate configurations evaluated by the four searches
 
 HistGradientBoosting performs better under shuffled historical evaluation, while Logistic Regression is more robust across later ordered campaign conditions and produces stronger historical lift at the tested call depths.
 
-### Duration leakage
+### Duration leakage and direct associations
 
-On the untouched final holdout, including completed-call `duration` produces a very large increase in ranking performance for both model families. This is diagnostic evidence that `duration` contains strong retrospective information, but the feature cannot be used when deciding whom to call because it is only known after the call has occurred.
+`duration` has Pearson correlation `+0.4612` with the target, far larger than any valid numeric pre-call predictor. It is nevertheless diagnostic only because final call length does not exist when the bank chooses whom to contact.
 
-### Feature reduction
+The valid numeric pre-call Pearson correlations, ranked by absolute magnitude, are:
 
-The selected full-model hyperparameters are transferred unchanged to the reduced feature sets. All 12 pre-call features retain the best ROC-AUC for both model families in the executed feature-reduction comparison, so the evidence does not justify dropping variables from the pilot model.
+| Feature | Pearson r |
+|---|---:|
+| `campaign` | -0.0404 |
+| `balance` | +0.0302 |
+| `age` | -0.0203 |
+| `day` | -0.0064 |
 
-### Class imbalance
+There is no fifth valid numeric pre-call predictor. `duration` must not be included in the deployable Pearson figure or feature-selection ranking.
 
-Weighting and resampling primarily alter the precision/recall trade-off. The project therefore retains the unweighted ranking models for the pilot and chooses call depth from operational capacity and economics rather than using the default probability threshold as the business decision rule.
+The strongest categorical associations are:
 
-Nested threshold optimisation is reported separately for hard-classification behaviour and does not alter the underlying ranking order.
+| Feature | Cramér's V |
+|---|---:|
+| `month` | 0.1945 |
+| `contact` | 0.0896 |
+| `job` | 0.0589 |
+| `marital` | 0.0579 |
+| `housing` | 0.0541 |
+
+These values describe direct univariate association; they are not themselves a feature-selection rule.
+
+### Untouched-holdout baseline and tuned ranking results
+
+The leakage comparison must distinguish baseline from tuned models and pre-call from duration-inclusive models. On the common untouched 20% holdout:
+
+| Model | Stage | Predictors | ROC-AUC | PR-AUC |
+|---|---|---|---:|---:|
+| LR | Untuned | Pre-call | 0.7112 | 0.2417 |
+| LR | Untuned | + duration | 0.9324 | 0.5250 |
+| HGB | Untuned | Pre-call | 0.7341 | 0.2683 |
+| HGB | Untuned | + duration | 0.9515 | 0.5852 |
+| LR | Tuned | Pre-call | 0.7097 | 0.2403 |
+| LR | Tuned | + duration | 0.9330 | 0.5232 |
+| HGB | Tuned | Pre-call | 0.7299 | 0.2698 |
+| HGB | Tuned | + duration | 0.9511 | 0.5815 |
+
+Tuning changes these holdout ranking metrics only modestly. The major performance jump is caused by including post-call `duration`, not by hyperparameter optimisation. All deployable analyses therefore exclude `duration`.
+
+### Feature importance and reduction
+
+Logistic Regression grouped coefficient importance and HGB permutation importance answer different questions. The leading LR grouped coefficient magnitudes are `month` 0.9579, `contact` 0.4748, and a three-way displayed tie at 0.3444 for `loan`, `default` and `housing`. The HGB permutation ranking used to define the tested reduced subsets is `month` 0.1478, `contact` 0.1051, `day` 0.0559, `housing` 0.0348 and `age` 0.0144.
+
+The transferred-parameter feature-reduction results are:
+
+| Model | Metric | Top 3 | Top 4 | Top 5 | All 12 |
+|---|---|---:|---:|---:|---:|
+| LR | ROC-AUC | 0.6673 | 0.6728 | 0.6738 | **0.6848** |
+| LR | PR-AUC | 0.1953 | 0.2122 | 0.2103 | **0.2154** |
+| HGB | ROC-AUC | 0.7036 | 0.7062 | 0.7072 | **0.7153** |
+| HGB | PR-AUC | 0.2439 | **0.2463** | 0.2446 | 0.2447 |
+
+`month` and `contact` are the clearest consensus features. `day` has almost no direct Pearson relationship yet ranks third under HGB permutation importance, which is consistent with nonlinear or interaction value. `housing` contributes across direct association and model-based views, while `age` has weak direct Pearson correlation but measurable HGB permutation value.
+
+All 12 predictors give the best ROC-AUC for both model families and the best LR PR-AUC. HGB Top 4 exceeds All 12 PR-AUC by only 0.0016 while its ROC-AUC is 0.0091 lower. That small PR-AUC difference is insufficient evidence to discard eight predictors, so the pilot configuration retains all 12 valid pre-call predictors.
+
+### Class imbalance and threshold behaviour
+
+The notebook comparison shows that weighting and resampling mainly move the precision/recall operating point rather than creating a large, consistent ranking gain. For HGB, random oversampling raises ROC-AUC from 0.7153 to 0.7191 and PR-AUC from 0.2447 to 0.2505, but accuracy falls from 0.9276 to 0.7507 and precision from 0.5086 to 0.1557. SMOTENC degrades ranking for both model families.
+
+Nested threshold optimisation gives the strongest hard-classification F1 in this comparison: 0.2744 for LR and 0.3220 for HGB. Because threshold optimisation changes the binary cutoff rather than the score ordering, LR ROC-AUC/PR-AUC remain 0.6848/0.2154 and HGB remain 0.7153/0.2447.
+
+For the ranking pilot, the unweighted model remains the operating form and call depth is selected from capacity and economics rather than a universal 0.5 probability cutoff.
+
+### Shuffled versus ordered validation
+
+The tuned, unweighted pre-call models show a clear validation-regime reversal:
+
+| Model | Shuffled ROC-AUC | Shuffled PR-AUC | Weighted ordered ROC-AUC | Weighted ordered PR-AUC |
+|---|---:|---:|---:|---:|
+| LR | 0.6848 | 0.2154 | **0.5663** | **0.1126** |
+| HGB | **0.7153** | **0.2447** | 0.5530 | 0.0968 |
+
+HGB is stronger on row-stratified shuffled folds, but LR is stronger across the eight eligible later ordered blocks. The ordered comparison is therefore the more relevant robustness evidence for selecting the pilot ranker.
+
+### Calibration and pseudo-profile sensitivity
+
+Across the eight eligible ordered periods, the observed subscription rate is 8.05%. LR's mean score is 7.54%, with period-weighted Brier score 0.0748 and ECE 0.0444. HGB's mean score is 4.93%, with Brier score 0.0741 and ECE 0.0337. These diagnostics do not justify treating either score as a literal subscription probability; prospective recalibration is required.
+
+A pseudo-profile grouped five-fold sensitivity using `age + job + marital + education + balance` leaves ranking results almost unchanged: LR ROC-AUC/PR-AUC are 0.6850/0.2157 and HGB are 0.7151/0.2444. Because the dataset has no true customer identifier, this is only a dependence sensitivity check and cannot prove customer-level independence.
+
+### Exploratory population
+
+The static full-data exploratory rule contains 6,774 customers and 778 subscribers, a historical subscription rate of 11.49%. In the fold-defined modelling comparison the eligible masks contain 6,772 observations because the balance-Q3 cutoff is learned within each training fold.
+
+The canonical Baseline rows are LR ROC-AUC/PR-AUC 0.6925/0.2863 and HGB 0.6941/0.3035. Full-population tuned parameters transferred into the same population are retained only as a secondary sensitivity; no segment-specific hyperparameter tuning is claimed.
 
 ### Ordered robustness and lift
 
-Across the eight eligible expanding-window periods, weighted ordered ROC-AUC is 0.5663 for Logistic Regression and 0.5530 for HistGradientBoosting. Period-local lift is stronger for Logistic Regression at the tested call depths; at 5% call depth it captures 228 subscribers compared with about 123 expected under random selection at the same call volume, a lift of approximately 1.85.
+Across the eight eligible expanding-window periods, weighted ordered ROC-AUC is 0.5663 for Logistic Regression and 0.5530 for HistGradientBoosting. Period-local lift is stronger for Logistic Regression at the tested call depths; at 5% call depth it captures 228 subscribers compared with about 123 expected under random selection at the same call volume, a lift of approximately 1.85. At 20% depth it captures 689 subscribers versus about 492 expected randomly, corresponding to lift 1.4009.
 
 The forward scores are useful for ranking but should not yet be treated as exact subscription probabilities. Prospective recalibration is required before probability-based expected-value or revenue calculations.
 
