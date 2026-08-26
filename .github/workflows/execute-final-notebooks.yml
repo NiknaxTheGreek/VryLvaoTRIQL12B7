@@ -1,0 +1,94 @@
+name: Execute final notebooks
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/execute-final-notebooks.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  execute:
+    if: github.actor != 'github-actions[bot]' && !contains(github.event.head_commit.message, '[skip notebook execution]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install verified environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install numpy==2.3.5 pandas==2.2.3 matplotlib==3.10.8 scipy==1.17.0 scikit-learn==1.8.0 imbalanced-learn==0.14.1 nbformat==5.10.4 nbclient==0.10.4 ipykernel
+
+      - name: Reconstruct exact source dataset
+        run: |
+          curl -L --fail -o term-deposit-marketing-2020.csv https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv
+          echo '396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413  term-deposit-marketing-2020.csv' | sha256sum -c -
+          python - <<'PY'
+          import hashlib
+          import pandas as pd
+          src = pd.read_csv('term-deposit-marketing-2020.csv')
+          assert src.shape == (40000, 14)
+          assert int((src['y'] == 'yes').sum()) == 2896
+          src['y_binary'] = src['y'].eq('yes').astype(int)
+          src.to_csv('term-deposit-marketing-2020-labelled.csv', index=False)
+          data = open('term-deposit-marketing-2020-labelled.csv','rb').read()
+          assert hashlib.sha256(data).hexdigest() == '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
+          PY
+          rm term-deposit-marketing-2020.csv
+
+      - name: Execute notebooks sequentially
+        run: |
+          python - <<'PY'
+          import nbformat
+          from nbclient import NotebookClient
+          files = [
+              '01_data_eda.ipynb',
+              '02_baseline_tuning.ipynb',
+              '03_features_imbalance.ipynb',
+              '04_segments_robustness.ipynb',
+              '05_final_validation_reporting.ipynb',
+          ]
+          for path in files:
+              print(f'Executing {path}', flush=True)
+              nb = nbformat.read(path, as_version=4)
+              out = NotebookClient(nb, timeout=600, kernel_name='python3', allow_errors=False).execute(cwd='.')
+              nbformat.write(out, path)
+              print(f'PASS {path}', flush=True)
+          PY
+
+      - name: Validate executed notebooks
+        run: |
+          python - <<'PY'
+          import nbformat
+          files = [
+              '01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb',
+              '04_segments_robustness.ipynb','05_final_validation_reporting.ipynb'
+          ]
+          for path in files:
+              nb = nbformat.read(path, as_version=4)
+              errors = [o for c in nb.cells for o in c.get('outputs', []) if o.get('output_type') == 'error']
+              assert not errors, (path, errors)
+              kinds = [c.cell_type for c in nb.cells]
+              assert 'markdown' in kinds and 'code' in kinds
+              assert all(not (kinds[i] == 'code' and kinds[i+1] == 'code') for i in range(len(kinds)-1))
+              assert all(c.get('execution_count') is not None for c in nb.cells if c.cell_type == 'code')
+              print('VALID', path)
+          PY
+
+      - name: Commit executed notebooks and dataset
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 01_data_eda.ipynb 02_baseline_tuning.ipynb 03_features_imbalance.ipynb 04_segments_robustness.ipynb 05_final_validation_reporting.ipynb term-deposit-marketing-2020-labelled.csv
+          git commit -m 'Execute final notebooks with verified outputs'
+          git push origin main
