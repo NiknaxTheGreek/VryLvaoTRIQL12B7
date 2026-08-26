@@ -1,0 +1,136 @@
+name: Step 2 final execution and commit
+
+on:
+  push:
+    paths:
+      - '.github/workflows/step2_finalize.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install verified environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy==2.3.5 pandas==2.2.3 scipy==1.17.0 \
+            matplotlib==3.10.8 scikit-learn==1.8.0 \
+            imbalanced-learn==0.14.1 nbconvert==7.17.1 ipykernel
+
+      - name: Reconstruct byte-exact canonical labelled dataset
+        run: |
+          python - <<'PY'
+          import hashlib, io, pathlib, urllib.request
+          import pandas as pd
+          url='https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv'
+          raw=urllib.request.urlopen(url,timeout=60).read()
+          assert hashlib.sha256(raw).hexdigest()=='396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413'
+          src=pd.read_csv(io.BytesIO(raw))
+          assert src.shape==(40000,14)
+          assert list(src.columns)==['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
+          assert int((src.y=='yes').sum())==2896 and int((src.y=='no').sum())==37104
+          assert int(src.duplicated().sum())==0
+          block=src.month.ne(src.month.shift()).cumsum()
+          assert src.groupby(block).size().tolist()==[7957,4486,6380,5215,80,3598,13,1176,2296,258,2718,5575,248]
+          assert src.assign(_y=(src.y=='yes').astype(int)).groupby(block)._y.sum().tolist()==[258,201,384,288,49,220,1,38,255,125,451,533,93]
+          labelled=src.copy(); labelled['y_binary']=labelled.y.eq('yes').astype(int)
+          labelled.to_csv('term-deposit-marketing-2020-labelled.csv',index=False)
+          out=pathlib.Path('term-deposit-marketing-2020-labelled.csv').read_bytes()
+          actual=hashlib.sha256(out).hexdigest(); expected='8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
+          assert len(out)==2834085 and actual==expected,(len(out),actual)
+          print('EXACT DATASET PASS',len(out),actual)
+          PY
+
+      - name: Execute 01
+        run: jupyter nbconvert --to notebook --execute --inplace 01_data_eda.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+      - name: Execute 02
+        run: jupyter nbconvert --to notebook --execute --inplace 02_baseline_tuning.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+      - name: Execute 03
+        run: jupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+      - name: Execute 04
+        run: jupyter nbconvert --to notebook --execute --inplace 04_segments_robustness.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+      - name: Execute 05
+        run: jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+
+      - name: Validate executed notebooks and canonical result chain
+        run: |
+          python - <<'PY'
+          import json,re
+          from pathlib import Path
+          names=['01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']
+          def st(c):
+              s=c.get('source',[]); return ''.join(s) if isinstance(s,list) else str(s)
+          def ot(nb):
+              p=[]
+              for c in nb['cells']:
+                  if c.get('cell_type')!='code': continue
+                  for o in c.get('outputs',[]):
+                      if 'text' in o:
+                          t=o['text']; p.append(''.join(t) if isinstance(t,list) else str(t))
+                      t=o.get('data',{}).get('text/plain')
+                      if t is not None: p.append(''.join(t) if isinstance(t,list) else str(t))
+              return '\n'.join(p)
+          def numbers(text):
+              return [float(x) for x in re.findall(r'(?<![A-Za-z0-9_])[-+]?(?:\d+\.\d+|\d+)(?:[eE][-+]?\d+)?',text)]
+          nbs={n:json.loads(Path(n).read_text(encoding='utf-8')) for n in names}
+          texts={n:ot(nb) for n,nb in nbs.items()}
+          for n,nb in nbs.items():
+              kinds=[c.get('cell_type') for c in nb['cells']]; code=[c for c in nb['cells'] if c.get('cell_type')=='code']
+              assert 'markdown' in kinds and code,n
+              assert all(c.get('execution_count') is not None for c in code),n
+              assert all(not any(o.get('output_type')=='error' for o in c.get('outputs',[])) for c in code),n
+              assert all(not(kinds[i]=='code' and kinds[i+1]=='code') for i in range(len(kinds)-1)),f'consecutive code cells in {n}'
+              assert 'term-deposit-marketing-2020-labelled.csv' in '\n'.join(st(c) for c in nb['cells']),n
+              print(n,'EXECUTION/STRUCTURE PASS')
+
+          # Exact selected hyperparameters must reproduce.
+          t2=texts['02_baseline_tuning.ipynb']
+          for token in ['8.483428982440726','0.0610540229658533','"max_depth": 8','"learning_rate": 0.05','"max_leaf_nodes": 15','"min_samples_leaf": 20']:
+              assert token in t2,f'NB2 selected parameter missing: {token}'
+          print('NB2 HYPERPARAMETERS PASS')
+
+          # Numerical canonical checks allow only tiny floating-point/runner jitter.
+          expected={
+            '01_data_eda.ipynb':[0.4612,6774],
+            '02_baseline_tuning.ipynb':[0.240265,0.272820,0.943115],
+            '03_features_imbalance.ipynb':[0.240265,0.272820,0.287171,0.353059,0.274559],
+            '04_segments_robustness.ipynb':[0.566290,0.551600,0.112626,0.096333],
+            '05_final_validation_reporting.ipynb':[1.853857,1.606389,1.401474,0.035101,0.044442]
+          }
+          for n,vals in expected.items():
+              got=numbers(texts[n])
+              for e in vals:
+                  d=min((abs(x-e) for x in got),default=999)
+                  assert d<=5e-6,f'{n}: canonical {e} not reproduced; nearest diff={d}'
+              print(n,'CANONICAL NUMBERS PASS')
+
+          # Confirm the actual downstream feature definitions are duration-free.
+          for n in ['03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']:
+              src='\n'.join(st(c) for c in nbs[n]['cells'] if c.get('cell_type')=='code')
+              assert re.search(r'NUM\s*=\s*\["age","balance","day","campaign"\]',src),f'NUM pre-call definition missing in {n}'
+              assert re.search(r'CAT\s*=\s*\["job","marital","education","default","housing","loan","contact","month"\]',src),f'CAT pre-call definition missing in {n}'
+              assert re.search(r'PRE\s*=\s*NUM\s*\+\s*CAT',src),f'PRE definition missing in {n}'
+              print(n,'DURATION EXCLUSION PASS')
+          print('ALL STEP-2 CHECKS PASS')
+          PY
+
+      - name: Commit executed notebooks and canonical labelled dataset
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 01_data_eda.ipynb 02_baseline_tuning.ipynb 03_features_imbalance.ipynb 04_segments_robustness.ipynb 05_final_validation_reporting.ipynb term-deposit-marketing-2020-labelled.csv
+          git commit -m 'Execute final notebooks 01-05 and verify canonical outputs'
+          git push origin main
