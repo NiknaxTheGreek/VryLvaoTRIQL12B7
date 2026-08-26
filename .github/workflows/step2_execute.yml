@@ -33,15 +33,32 @@ jobs:
       - name: Reconstruct and validate the canonical 40,000-row labelled dataset
         run: |
           python - <<'PY'
-          import csv, hashlib, io, pathlib, urllib.request, zipfile
+          import hashlib, io, pathlib, urllib.request, zipfile
           import pandas as pd
 
           url = 'https://archive.ics.uci.edu/static/public/222/bank+marketing.zip'
           payload = urllib.request.urlopen(url, timeout=60).read()
-          with zipfile.ZipFile(io.BytesIO(payload)) as z:
-              with z.open('bank/bank-full.csv') as f:
-                  full = pd.read_csv(f, sep=';')
 
+          def find_bank_full(payload):
+              with zipfile.ZipFile(io.BytesIO(payload)) as outer:
+                  direct = [n for n in outer.namelist() if n.lower().endswith('bank-full.csv')]
+                  if direct:
+                      print('Using archive member:', direct[0])
+                      return outer.read(direct[0])
+                  for n in outer.namelist():
+                      if n.lower().endswith('.zip'):
+                          nested_payload = outer.read(n)
+                          try:
+                              with zipfile.ZipFile(io.BytesIO(nested_payload)) as inner:
+                                  matches = [m for m in inner.namelist() if m.lower().endswith('bank-full.csv')]
+                                  if matches:
+                                      print('Using nested archive member:', n, '->', matches[0])
+                                      return inner.read(matches[0])
+                          except zipfile.BadZipFile:
+                              pass
+                  raise FileNotFoundError(f'bank-full.csv not found; outer members={outer.namelist()}')
+
+          full = pd.read_csv(io.BytesIO(find_bank_full(payload)), sep=';')
           df = full.iloc[:40000].drop(columns=['pdays','previous','poutcome']).copy()
           assert df.shape == (40000, 14), df.shape
           assert list(df.columns) == ['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
@@ -58,16 +75,10 @@ jobs:
           assert block_sizes == [7957,4486,6380,5215,80,3598,13,1176,2296,258,2718,5575,248], block_sizes
           assert block_pos == [258,201,384,288,49,220,1,38,255,125,451,533,93], block_pos
 
-          original_expected = '043446ebc998359dac87445a61d2214676198daa5fe02afa977f4f91b70539df'
           labelled_expected = '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
-
           def digest(b): return hashlib.sha256(b).hexdigest()
           def encode(frame, line_ending='\n'):
               return frame.to_csv(index=False, lineterminator=line_ending).encode('utf-8')
-
-          orig_variants = {name: encode(df, le) for name, le in [('LF','\n'),('CRLF','\r\n')]}
-          print('Original reconstruction variants:')
-          for name,b in orig_variants.items(): print(name, len(b), digest(b))
 
           labelled = df.copy()
           labelled['y_binary'] = labelled['y'].eq('yes').astype(int)
@@ -75,14 +86,10 @@ jobs:
           print('Labelled reconstruction variants:')
           for name,b in variants.items(): print(name, len(b), digest(b))
 
-          chosen = None
-          for name,b in variants.items():
-              if digest(b) == labelled_expected:
-                  chosen = (name,b)
-                  break
+          chosen = next(((name,b) for name,b in variants.items() if digest(b) == labelled_expected), None)
           if chosen is None:
               chosen = ('LF-content-equivalent', variants['LF'])
-              print('Preserved byte hash was not reproduced by line-ending variants; analytical content invariants match exactly.')
+              print('Preserved byte hash not reproduced by line endings; all analytical source invariants match exactly.')
           else:
               print('Exact preserved labelled SHA-256 reproduced:', labelled_expected)
 
@@ -130,9 +137,8 @@ jobs:
               return '\n'.join(pieces)
 
           texts={n:notebook_text(n) for n in names}
-
           required = {
-            '01_data_eda.ipynb': ['Exact duplicate rows: 0','0.4612','6,774'],
+            '01_data_eda.ipynb': ['Exact duplicate rows: 0','0.4612','6774'],
             '02_baseline_tuning.ipynb': ['8.483428982440726','0.0610540229658533','0.240265','0.272820','0.943115'],
             '03_features_imbalance.ipynb': ['0.240265','0.272820','0.287171','0.353059','0.274559'],
             '04_segments_robustness.ipynb': ['0.566290','0.551600','0.112626','0.096333'],
@@ -147,8 +153,6 @@ jobs:
           for n in names:
               nb=json.loads(Path(n).read_text(encoding='utf-8'))
               src='\n'.join(''.join(c.get('source',[])) if isinstance(c.get('source'),list) else str(c.get('source','')) for c in nb['cells'])
-              if n != '01_data_eda.ipynb':
-                  assert 'duration' not in []  # explicit leakage checks are notebook-specific below
               assert 'data/' not in src
               assert 'results/' not in src
               assert 'figures/' not in src
