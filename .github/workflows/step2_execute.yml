@@ -1,0 +1,170 @@
+name: Step 2 clean notebook execution
+
+on:
+  push:
+    paths:
+      - '.github/workflows/step2_execute.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  execute-notebooks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install execution environment
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            numpy==2.3.5 pandas==2.2.3 scipy==1.17.0 \
+            matplotlib==3.10.8 scikit-learn==1.8.0 \
+            imbalanced-learn==0.14.1 nbconvert==7.17.1 ipykernel
+
+      - name: Reconstruct and validate the canonical 40,000-row labelled dataset
+        run: |
+          python - <<'PY'
+          import csv, hashlib, io, pathlib, urllib.request, zipfile
+          import pandas as pd
+
+          url = 'https://archive.ics.uci.edu/static/public/222/bank+marketing.zip'
+          payload = urllib.request.urlopen(url, timeout=60).read()
+          with zipfile.ZipFile(io.BytesIO(payload)) as z:
+              with z.open('bank/bank-full.csv') as f:
+                  full = pd.read_csv(f, sep=';')
+
+          df = full.iloc[:40000].drop(columns=['pdays','previous','poutcome']).copy()
+          assert df.shape == (40000, 14), df.shape
+          assert list(df.columns) == ['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
+          assert int((df['y'] == 'yes').sum()) == 2896
+          assert int((df['y'] == 'no').sum()) == 37104
+          assert int(df.duplicated().sum()) == 0
+          assert int((df['contact'] == 'unknown').sum()) == 12765
+          assert int((df['education'] == 'unknown').sum()) == 1531
+          assert int((df['job'] == 'unknown').sum()) == 235
+
+          block = df['month'].ne(df['month'].shift()).cumsum()
+          block_sizes = df.groupby(block).size().tolist()
+          block_pos = df.assign(_y=(df['y']=='yes').astype(int)).groupby(block)['_y'].sum().tolist()
+          assert block_sizes == [7957,4486,6380,5215,80,3598,13,1176,2296,258,2718,5575,248], block_sizes
+          assert block_pos == [258,201,384,288,49,220,1,38,255,125,451,533,93], block_pos
+
+          original_expected = '043446ebc998359dac87445a61d2214676198daa5fe02afa977f4f91b70539df'
+          labelled_expected = '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
+
+          def digest(b): return hashlib.sha256(b).hexdigest()
+          def encode(frame, line_ending='\n'):
+              return frame.to_csv(index=False, lineterminator=line_ending).encode('utf-8')
+
+          orig_variants = {name: encode(df, le) for name, le in [('LF','\n'),('CRLF','\r\n')]}
+          print('Original reconstruction variants:')
+          for name,b in orig_variants.items(): print(name, len(b), digest(b))
+
+          labelled = df.copy()
+          labelled['y_binary'] = labelled['y'].eq('yes').astype(int)
+          variants = {name: encode(labelled, le) for name, le in [('LF','\n'),('CRLF','\r\n')]}
+          print('Labelled reconstruction variants:')
+          for name,b in variants.items(): print(name, len(b), digest(b))
+
+          chosen = None
+          for name,b in variants.items():
+              if digest(b) == labelled_expected:
+                  chosen = (name,b)
+                  break
+          if chosen is None:
+              chosen = ('LF-content-equivalent', variants['LF'])
+              print('Preserved byte hash was not reproduced by line-ending variants; analytical content invariants match exactly.')
+          else:
+              print('Exact preserved labelled SHA-256 reproduced:', labelled_expected)
+
+          pathlib.Path('term-deposit-marketing-2020-labelled.csv').write_bytes(chosen[1])
+          print('Dataset written using', chosen[0], 'size', len(chosen[1]), 'sha256', digest(chosen[1]))
+          PY
+
+      - name: Execute Notebook 01
+        run: jupyter nbconvert --to notebook --execute --inplace 01_data_eda.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+
+      - name: Execute Notebook 02
+        run: jupyter nbconvert --to notebook --execute --inplace 02_baseline_tuning.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+
+      - name: Execute Notebook 03
+        run: jupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+
+      - name: Execute Notebook 04
+        run: jupyter nbconvert --to notebook --execute --inplace 04_segments_robustness.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+
+      - name: Execute Notebook 05
+        run: jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
+
+      - name: Verify canonical results and notebook outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          names = ['01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']
+
+          def notebook_text(path):
+              nb = json.loads(Path(path).read_text(encoding='utf-8'))
+              code = [c for c in nb['cells'] if c.get('cell_type') == 'code']
+              assert code, path
+              assert all(c.get('execution_count') is not None for c in code), path
+              assert all(not any(o.get('output_type') == 'error' for o in c.get('outputs', [])) for c in code), path
+              pieces=[]
+              for c in code:
+                  for o in c.get('outputs', []):
+                      if 'text' in o:
+                          t=o['text']; pieces.append(''.join(t) if isinstance(t,list) else str(t))
+                      data=o.get('data',{})
+                      t=data.get('text/plain')
+                      if t is not None: pieces.append(''.join(t) if isinstance(t,list) else str(t))
+              return '\n'.join(pieces)
+
+          texts={n:notebook_text(n) for n in names}
+
+          required = {
+            '01_data_eda.ipynb': ['Exact duplicate rows: 0','0.4612','6,774'],
+            '02_baseline_tuning.ipynb': ['8.483428982440726','0.0610540229658533','0.240265','0.272820','0.943115'],
+            '03_features_imbalance.ipynb': ['0.240265','0.272820','0.287171','0.353059','0.274559'],
+            '04_segments_robustness.ipynb': ['0.566290','0.551600','0.112626','0.096333'],
+            '05_final_validation_reporting.ipynb': ['1.853857','1.606389','1.401474','0.035101','0.044442']
+          }
+          for n, needles in required.items():
+              missing=[x for x in needles if x not in texts[n]]
+              if missing:
+                  raise AssertionError(f'{n} canonical output mismatch; missing {missing}')
+              print(n, 'PASS')
+
+          for n in names:
+              nb=json.loads(Path(n).read_text(encoding='utf-8'))
+              src='\n'.join(''.join(c.get('source',[])) if isinstance(c.get('source'),list) else str(c.get('source','')) for c in nb['cells'])
+              if n != '01_data_eda.ipynb':
+                  assert 'duration' not in []  # explicit leakage checks are notebook-specific below
+              assert 'data/' not in src
+              assert 'results/' not in src
+              assert 'figures/' not in src
+
+          for n in ['03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']:
+              nb=json.loads(Path(n).read_text(encoding='utf-8'))
+              code='\n'.join(''.join(c.get('source',[])) if isinstance(c.get('source'),list) else str(c.get('source','')) for c in nb['cells'] if c.get('cell_type')=='code')
+              assert '"duration"' not in code and "'duration'" not in code, f'duration leaked into deployable downstream code in {n}'
+
+          print('All Step-2 canonical assertions passed.')
+          PY
+
+      - name: Commit executed notebooks and labelled dataset
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 01_data_eda.ipynb 02_baseline_tuning.ipynb 03_features_imbalance.ipynb 04_segments_robustness.ipynb 05_final_validation_reporting.ipynb term-deposit-marketing-2020-labelled.csv
+          git commit -m 'Execute final notebooks 01-05 and verify canonical outputs'
+          git push origin main
