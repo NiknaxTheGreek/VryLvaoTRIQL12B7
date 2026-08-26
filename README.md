@@ -50,12 +50,12 @@ The data contain month labels but no verified year, campaign identifier or trust
 The five executed notebooks form the analytical source of truth:
 
 1. `01_data_eda.ipynb` — data quality, class balance, associations, ordered blocks and descriptive higher-conversion population.
-2. `02_baseline_tuning.ipynb` — default LR/HGB, leakage comparison, deterministic tuning and untouched holdout evaluation.
+2. `02_baseline_tuning.ipynb` — baseline/default LR/HGB, leakage comparison, deterministic tuning and untouched holdout evaluation.
 3. `03_features_imbalance.ipynb` — feature importance, feature reduction, imbalance strategies and threshold diagnostics.
 4. `04_segments_robustness.ipynb` — exploratory population validation, shuffled validation, pseudo-profile grouped sensitivity and expanding-window ordered validation.
 5. `05_final_validation_reporting.ipynb` — period-local lift, calibration diagnostics and final reporting summaries.
 
-All notebooks use `SEED=42`, contain explanatory Markdown cells, read the root-level labelled dataset directly and do **not** depend on generated folders or cached result files.
+All notebooks use `SEED=42`, contain explanatory Markdown between substantive code stages, read the root-level labelled dataset directly and do **not** depend on generated folders or cached result files.
 
 ## Is the selection of Logistic Regression and HistGradientBoosting justified?
 
@@ -63,7 +63,7 @@ Yes, for this project. This is **not an exhaustive benchmark of every classifier
 
 HGB is stronger in conventional shuffled historical evaluation. LR becomes the preferred pilot model only after ordered robustness, historical lift, interpretability and monitoring simplicity are considered together.
 
-## Validation and Hyperparameter Selection
+## Validation Design
 
 The 40,000 rows are split deterministically with `SEED=42`:
 
@@ -73,35 +73,72 @@ The 40,000 rows are split deterministically with `SEED=42`:
 - tuning validation inside development: **8,000** rows;
 - HGB search uses a reproducible **10,000-row stratified tuning subsample**.
 
-Hyperparameter selection uses one fixed train/validation split, **not K-fold hyperparameter tuning**. PR-AUC is the primary selection objective and ROC-AUC is the tie-breaker.
+Hyperparameter selection uses one fixed train/validation split, **not K-fold hyperparameter tuning**. PR-AUC is the primary selection objective and ROC-AUC is the deterministic tie-breaker.
 
-| Configuration | Final selected settings |
+## Hyperparameters and Tuning Specification
+
+This section separates three things that should not be confused: **what the hyperparameters mean and what values were searched; the common baseline/default model settings; and the four separately selected tuned winners**.
+
+### Hyperparameter descriptions and search values
+
+| Model | Hyperparameter | What it controls | Values searched |
+|---|---|---|---|
+| LR | `C` | Inverse regularisation strength; larger values mean weaker regularisation | 15 log-spaced values from 0.001 to 100: 0.001, 0.002276, 0.005179, 0.011788, 0.026827, 0.061054, 0.138950, 0.316228, 0.719686, 1.637894, 3.727594, 8.483429, 19.306977, 43.939706, 100 |
+| LR | `penalty` | Coefficient regularisation type | L1, L2 |
+| LR | `class_weight` | Relative class weighting | None, balanced |
+| HGB | `max_iter` | Maximum boosting iterations | 50, 100, 150, 200, 300, 400 |
+| HGB | `max_depth` | Maximum tree depth | 3, 4, 5, 6, 8, None |
+| HGB | `learning_rate` | Contribution of each boosting iteration | 0.01, 0.03, 0.05, 0.10, 0.20 |
+| HGB | `max_leaf_nodes` | Maximum terminal leaves per tree | 15, 31, 63, 127 |
+| HGB | `l2_regularization` | L2 penalty on leaf values | 0, 0.1, 0.5, 1, 2 |
+| HGB | `min_samples_leaf` | Minimum observations required in a leaf | 10, 20, 30, 50 |
+| HGB | `class_weight` | Relative class weighting | None, balanced |
+
+For LR tuning, `solver=liblinear`, `max_iter=3000` and `random_state=42` are fixed while the three parameters above are searched. LR exhaustively evaluates **60 configurations per feature condition**. HGB has **28,800 possible combinations** and samples the same **100 candidates per feature condition** with `ParameterSampler(..., random_state=42)`; `early_stopping=True` and `random_state=42` are fixed during HGB tuning. Across both models and both feature conditions, exactly **320 candidate configurations** are evaluated.
+
+### Baseline/default model specifications
+
+The baseline comparison is deliberately like-for-like. **Within each model family, the pre-call baseline and the + duration baseline use exactly the same model hyperparameters. Only the feature set changes.** There are therefore two baseline model specifications, not four.
+
+| Baseline model | Hyperparameters used for both Pre-call and + duration |
 |---|---|
-| LR pre-call | L2, `C=8.4834289824`, unweighted |
-| LR + duration | L1, `C=0.0610540230`, unweighted |
-| HGB pre-call | 200 iterations, depth 8, learning rate 0.05, 15 leaves, L2=0, min leaf 20, unweighted, early stopping |
-| HGB + duration | 200 iterations, depth 3, learning rate 0.05, 127 leaves, L2=2, min leaf 10, balanced, early stopping |
+| LR | `C=1.0`, L2 penalty, `solver=lbfgs`, `max_iter=1000`, `tol=0.0001`, `class_weight=None`, `random_state=42` |
+| HGB | `loss=log_loss`, `learning_rate=0.1`, `max_iter=100`, `max_leaf_nodes=31`, `max_depth=None`, `min_samples_leaf=20`, `l2_regularization=0`, `max_bins=255`, `early_stopping=auto`, `class_weight=None`, `random_state=42` |
 
-LR evaluates **60 fixed configurations per feature condition**. HGB has **28,800 possible combinations** and samples the same **100 candidates per feature condition** using `random_state=42`. Across both models and both feature conditions, exactly **320 candidate configurations** are evaluated.
+Thus the baseline leakage test is:
 
-### Untouched final holdout
+- LR baseline settings + 12 pre-call features **versus the same LR settings** + `duration`;
+- HGB baseline settings + 12 pre-call features **versus the same HGB settings** + `duration`.
+
+### Tuned model specifications
+
+Tuning is then run **separately for each model × feature condition**, so the four tuned winners are allowed to differ.
+
+| Tuned configuration | Selected hyperparameters |
+|---|---|
+| LR pre-call | L2, `C=8.483428982440726`, `class_weight=None`; fixed tuning settings `solver=liblinear`, `max_iter=3000`, `random_state=42` |
+| LR + duration | L1, `C=0.0610540229658533`, `class_weight=None`; fixed tuning settings `solver=liblinear`, `max_iter=3000`, `random_state=42` |
+| HGB pre-call | `max_iter=200`, `max_depth=8`, `learning_rate=0.05`, `max_leaf_nodes=15`, `l2_regularization=0`, `min_samples_leaf=20`, `class_weight=None`, `early_stopping=True`, `random_state=42` |
+| HGB + duration | `max_iter=200`, `max_depth=3`, `learning_rate=0.05`, `max_leaf_nodes=127`, `l2_regularization=2`, `min_samples_leaf=10`, `class_weight=balanced`, `early_stopping=True`, `random_state=42` |
+
+## Untouched Final-Holdout Results
 
 | Stage | Model | Features | Accuracy | F1 | PR-AUC | ROC-AUC |
 |---|---|---|---:|---:|---:|---:|
-| Default | LR | Pre-call | 0.928250 | 0.062092 | 0.241676 | 0.711156 |
+| Baseline/default | LR | Pre-call | 0.928250 | 0.062092 | 0.241676 | 0.711156 |
+| Baseline/default | LR | + duration | 0.938125 | 0.416961 | 0.525049 | 0.932379 |
+| Baseline/default | HGB | Pre-call | 0.928000 | 0.073955 | 0.268264 | 0.734102 |
+| Baseline/default | HGB | + duration | 0.941125 | 0.511917 | 0.585190 | 0.951528 |
 | Tuned | LR | Pre-call | 0.928125 | 0.061990 | 0.240265 | 0.709681 |
-| Default | HGB | Pre-call | 0.928000 | 0.073955 | 0.268264 | 0.734102 |
-| Tuned | HGB | Pre-call | 0.928875 | 0.083736 | 0.272820 | 0.733930 |
-| Default | LR | + duration | 0.938125 | 0.416961 | 0.525049 | 0.932379 |
 | Tuned | LR | + duration | 0.936500 | 0.381995 | 0.520693 | 0.933188 |
-| Default | HGB | + duration | 0.941125 | 0.511917 | 0.585190 | 0.951528 |
+| Tuned | HGB | Pre-call | 0.928875 | 0.083736 | 0.272820 | 0.733930 |
 | Tuned | HGB | + duration | 0.866000 | 0.490978 | 0.549825 | 0.943115 |
 
-The with-duration results are diagnostic only. They demonstrate the size of the leakage effect and are not candidates for deployment.
+The with-duration results are diagnostic only. They demonstrate the size of the leakage effect and are not candidates for deployment. Tuning changes pre-call ranking only modestly: LR PR-AUC moves from **0.241676 to 0.240265**, while HGB moves from **0.268264 to 0.272820**.
 
 ## Feature Reduction and Class Imbalance
 
-Feature reduction is ordered **only by held-out HGB permutation importance measured as PR-AUC decrease**. Direct association, LR coefficients and permutation importance are kept separate because they answer different questions.
+Feature reduction is ordered **only by held-out HGB permutation importance measured as PR-AUC decrease**. Direct association, grouped LR coefficient magnitude and HGB permutation importance are kept separate because they answer different questions. The corresponding LR and HGB feature-importance bar plots are generated directly in Notebook 03.
 
 The five highest HGB permutation features are `month`, `contact`, `day`, `housing` and `age`. HGB Top-4 reaches PR-AUC **0.274531**, slightly above All-12 at **0.272820**, but its ROC-AUC falls to **0.719196** from **0.733930**. That exploratory result is not sufficient to declare the four-feature subset universally superior, so the final specification retains all 12 valid pre-call predictors.
 
