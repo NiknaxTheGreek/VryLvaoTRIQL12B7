@@ -67,6 +67,8 @@ The notebooks are reviewed in this order:
 4. `04_segments_robustness.ipynb` — exploratory population analysis and expanding-window ordered validation.
 5. `05_final_validation_reporting.ipynb` — final validation summaries, calibration, period-local lift and reporting outputs.
 
+A Phase 5 result is frozen only when its upstream model configuration is verified. If a selected Phase 4 configuration is later corrected, every downstream result that depends on that configuration is automatically reclassified as **requires rerun** until regenerated. Stored downstream numbers are never canonised merely because they appear in an executed notebook or report.
+
 The published notebooks contain executed outputs. The current flat repository does not include the original CSV or the intermediate `results/` and `figures/` artifacts referenced by some notebook cells, so a fresh clone is reviewable but is not a completely self-contained clean rerun environment. That execution dependency is separate from the repository layout: the absence of folders, HTML exports or standalone `.py` scripts is not treated as a defect in the published submission.
 
 ## 5. Verified Modelling Sequence
@@ -122,7 +124,9 @@ The already selected full-model hyperparameters are transferred unchanged to tho
 
 The exploratory rule `contact = cellular AND (job = retired OR age >= 71 OR balance >= Q3)` identifies 6,774 customers and 778 subscribers, giving an observed 11.49% conversion rate versus 7.24% overall.
 
-For the canonical exploratory-population comparison, the **Baseline** rows are the relevant result: they use the same full-population untuned model settings inside the population and do not perform subgroup-specific hyperparameter tuning. The notebook also reports **Tuned transfer** rows, where the full-population tuned pre-call settings are transferred unchanged. Those rows are retained as a secondary sensitivity comparison, not as evidence of segment-specific retuning.
+The canonical modelling test for this population uses the **full-population tuned pre-call parameters transferred unchanged into the population**. This is deliberate: the question is whether the already-selected global models transfer into the higher-conversion population, not whether untuned defaults happen to work there. No subgroup-specific hyperparameter search is performed, so the analysis remains a transfer test rather than a separately tuned segment model.
+
+The notebook also contains untuned **Baseline** rows. Those are retained only as a reference comparison; they are not the canonical population configuration. The segment balance-Q3 cutoff is learned inside each training fold, which is why the modelling comparison covers 6,772 fold-eligible observations rather than the 6,774 rows in the static full-data descriptive summary.
 
 ### Step 7 — Expanding-window ordered validation
 
@@ -318,7 +322,14 @@ A pseudo-profile grouped five-fold sensitivity using `age + job + marital + educ
 
 The static full-data exploratory rule contains 6,774 customers and 778 subscribers, a historical subscription rate of 11.49%. In the fold-defined modelling comparison the eligible masks contain 6,772 observations because the balance-Q3 cutoff is learned within each training fold.
 
-The canonical Baseline rows are LR ROC-AUC/PR-AUC 0.6925/0.2863 and HGB 0.6941/0.3035. Full-population tuned parameters transferred into the same population are retained only as a secondary sensitivity; no segment-specific hyperparameter tuning is claimed.
+The canonical population results are the **Tuned transfer** rows, which use the globally selected pre-call hyperparameters unchanged and perform no subgroup-specific tuning:
+
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC |
+|---|---:|---:|---:|---:|---:|---:|
+| LR tuned transfer | 0.8844 | 0.4576 | 0.0347 | 0.0645 | 0.6928 | 0.2863 |
+| HGB tuned transfer | 0.8845 | 0.4545 | 0.0257 | 0.0487 | 0.7152 | 0.3090 |
+
+Untuned baseline rows remain useful as a reference but are not the primary population test. The purpose of this section is to test transfer of the selected global modelling choices into an exploratory higher-conversion population, not to optimize a separate segment model.
 
 ### Ordered robustness and lift
 
