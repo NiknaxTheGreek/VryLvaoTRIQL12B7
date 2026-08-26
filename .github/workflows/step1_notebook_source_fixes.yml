@@ -1,0 +1,31 @@
+name: Step 1 notebook source fixes
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/step1_notebook_source_fixes.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply-fixes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply and validate notebook source fixes
+        run: python step1_apply.py
+
+      - name: Commit fixed notebook sources and remove temporary files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm step1_apply.py .github/workflows/step1_notebook_source_fixes.yml
+          git add 01_data_eda.ipynb 02_baseline_tuning.ipynb 03_features_imbalance.ipynb 04_segments_robustness.ipynb 05_final_validation_reporting.ipynb
+          git commit -m "Clarify notebook steps, hyperparameters and feature importance"
+          git push origin main
