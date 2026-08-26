@@ -19,7 +19,6 @@ jobs:
         run: |
           curl -L --fail -o term-deposit-marketing-2020.csv https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv
           echo '396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413  term-deposit-marketing-2020.csv' | sha256sum -c -
-          test "$(wc -l < term-deposit-marketing-2020.csv)" -eq 40001
           head -n 1 term-deposit-marketing-2020.csv | grep -q '^age,job,marital,education,default,balance,housing,loan,contact,day,month,duration,campaign,y$'
       - name: Commit original dataset
         run: |
