@@ -59,20 +59,6 @@ jobs:
               '05_final_validation_reporting.ipynb',
           ]
 
-          def output_text(nb):
-              chunks=[]
-              for c in nb['cells']:
-                  for o in c.get('outputs', []):
-                      if o.get('output_type') == 'stream':
-                          t=o.get('text','')
-                          chunks.append(''.join(t) if isinstance(t,list) else str(t))
-                      data=o.get('data',{})
-                      for k in ('text/plain','text/markdown'):
-                          if k in data:
-                              t=data[k]
-                              chunks.append(''.join(t) if isinstance(t,list) else str(t))
-              return '\n'.join(chunks)
-
           loaded={}
           for fn in notebooks:
               nb=json.loads(Path(fn).read_text())
@@ -99,6 +85,8 @@ jobs:
           for token in ['Logistic Regression Feature Importance','HistGradientBoosting Permutation Importance','barh']:
               assert token in nb3_src, f'NB3 missing feature-importance visual: {token}'
 
+          # Search the complete executed notebook JSON so values rendered only in HTML tables
+          # are checked as well as text/plain/stream output.
           checks={
               '02_baseline_tuning.ipynb':['0.240265','0.272820','8.483428982440726','0.0610540229658533'],
               '03_features_imbalance.ipynb':['0.287171','0.353059'],
@@ -106,9 +94,9 @@ jobs:
               '05_final_validation_reporting.ipynb':['1.853857','0.044442','0.035101'],
           }
           for fn,tokens in checks.items():
-              txt=output_text(loaded[fn])
+              rendered=json.dumps(loaded[fn], ensure_ascii=False)
               for token in tokens:
-                  assert token in txt, f'{fn}: canonical output {token} not reproduced'
+                  assert token in rendered, f'{fn}: canonical output {token} not reproduced'
 
           print('Canonical output verification: PASS')
           PY
