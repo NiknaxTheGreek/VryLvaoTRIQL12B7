@@ -19,7 +19,18 @@ jobs:
           fetch-depth: 0
 
       - name: Apply and validate notebook source fixes
-        run: python step1_apply.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('step1_apply.py')
+          s = p.read_text()
+          old = 'if cell["cell_type"] == "markdown":\n            s = text(cell).lower()'
+          new = 'if cell["cell_type"] == "markdown" and i > 0:\n            s = heading(cell).lower()'
+          if old not in s:
+              raise SystemExit('Expected find_md implementation not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+          python step1_apply.py
 
       - name: Commit fixed notebook sources and remove temporary files
         run: |
@@ -29,5 +40,3 @@ jobs:
           git add 01_data_eda.ipynb 02_baseline_tuning.ipynb 03_features_imbalance.ipynb 04_segments_robustness.ipynb 05_final_validation_reporting.ipynb
           git commit -m "Clarify notebook steps, hyperparameters and feature importance"
           git push origin main
-
-# robust retry: section matching is heading-based rather than cell-index based
