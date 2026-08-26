@@ -217,10 +217,14 @@ Install the pinned environment and execute the notebooks in order:
 
 ```bash
 pip install -r requirements.txt
-jupyter notebook
+jupyter nbconvert --to notebook --execute --inplace 01_data_eda.ipynb --ExecutePreprocessor.timeout=900
+jupyter nbconvert --to notebook --execute --inplace 02_baseline_tuning.ipynb --ExecutePreprocessor.timeout=900
+jupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb --ExecutePreprocessor.timeout=900
+jupyter nbconvert --to notebook --execute --inplace 04_segments_robustness.ipynb --ExecutePreprocessor.timeout=900
+jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=900
 ```
 
-Then run `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb` sequentially. The analytical notebooks do not require generated folders or intermediate result files.
+The commands execute the notebooks sequentially from `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb`. The analytical notebooks do not require generated folders or intermediate result files.
 
 ## Key Limitation
 

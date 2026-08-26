@@ -459,7 +459,7 @@ Then execute the notebooks in order:
 05_final_validation_reporting.ipynb
 ```
 
-The notebooks read `term-deposit-marketing-2020-labelled.csv` directly from the repository root. They do not require `data/`, `results/`, `figures/`, `scripts/` or `html/` directories and do not require cached CSV, JSON or NPY intermediates.
+The notebooks read `term-deposit-marketing-2020-labelled.csv` directly from the repository root. They require no auxiliary project directories and no cached CSV, JSON or NPY intermediates.
 
 The pinned environment is recorded in `requirements.txt` so the deterministic splits, seeded candidate sampling and fitted implementations can be reproduced as closely as possible.
 
