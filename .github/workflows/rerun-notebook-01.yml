@@ -1,0 +1,113 @@
+name: rerun-notebook-01
+on:
+  push:
+    branches: [clean-rerun-2026-08-26]
+    paths:
+      - '01_data_eda.ipynb'
+      - '.github/workflows/rerun-notebook-01.yml'
+  workflow_dispatch:
+
+jobs:
+  notebook01:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install analysis dependencies
+        run: pip install pandas numpy scipy matplotlib jupyter nbconvert nbformat ipykernel
+      - name: Download canonical-value Apziva dataset mirror
+        run: |
+          mkdir -p data
+          curl -L --fail --retry 3 'https://raw.githubusercontent.com/afolga/apziva_ai_residency/611c4bad71b4727f5c9fd2b4ad5e735faa21059c/project2/data/term-deposit-marketing-2020.csv' -o data/term-deposit-marketing-2020.csv
+      - name: Execute Notebook 01 from a clean output state
+        run: |
+          rm -rf results/eda figures/eda
+          jupyter nbconvert --to notebook --execute 01_data_eda.ipynb --output 01_data_eda.executed.ipynb --ExecutePreprocessor.timeout=900
+      - name: Independent cross-check and record
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json
+          import numpy as np
+          import pandas as pd
+          from scipy.stats import chi2_contingency
+
+          p=Path('data/term-deposit-marketing-2020.csv')
+          df=pd.read_csv(p)
+          y=df['y'].eq('yes').astype(int)
+
+          def cramer(x, y):
+              t=pd.crosstab(x,y)
+              n=t.to_numpy().sum()
+              chi=chi2_contingency(t, correction=False)[0]
+              r,k=t.shape
+              phi=chi/n
+              pc=max(0, phi-((k-1)*(r-1))/(n-1))
+              rc=r-((r-1)**2)/(n-1)
+              kc=k-((k-1)**2)/(n-1)
+              den=min(rc-1,kc-1)
+              return float(np.sqrt(pc/den)) if den>0 else 0.0
+
+          numeric=['age','balance','day','campaign']
+          categorical=['job','marital','education','default','housing','loan','contact','month']
+          pearson={f:float(df[f].corr(y)) for f in numeric}
+          duration_r=float(df['duration'].corr(y))
+          cv={f:cramer(df[f],df['y']) for f in categorical}
+          inter=df[numeric].corr()
+          max_pair=None
+          max_abs=-1
+          for i,a in enumerate(numeric):
+              for b in numeric[i+1:]:
+                  v=float(inter.loc[a,b])
+                  if abs(v)>max_abs:
+                      max_abs=abs(v); max_pair=(a,b,v)
+
+          z=df.copy()
+          z['y_binary']=y
+          z['row_order']=np.arange(len(z))
+          z['period_id']=z['month'].astype(str).ne(z['month'].astype(str).shift()).cumsum()
+          blocks=z.groupby('period_id').agg(month=('month','first'),start_row=('row_order','min'),end_row=('row_order','max'),customers=('y_binary','size'),subscribers=('y_binary','sum')).reset_index()
+          blocks['subscription_rate']=blocks.subscribers/blocks.customers
+
+          profile=['age','job','marital','education','balance']
+          sizes=df.groupby(profile, dropna=False).size()
+          pseudo_repeat_rows=int(sizes[sizes>1].sum())
+          pseudo_repeat_groups=int((sizes>1).sum())
+
+          summary={
+            'dataset_sha256_mirror':hashlib.sha256(p.read_bytes()).hexdigest(),
+            'shape':[int(df.shape[0]),int(df.shape[1])],
+            'yes':int(y.sum()),'no':int((1-y).sum()),'positive_rate':float(y.mean()),
+            'true_null_cells':int(df.isna().sum().sum()),'exact_duplicate_rows':int(df.duplicated().sum()),
+            'unknown_counts':{c:int((df[c]=='unknown').sum()) for c in categorical},
+            'pearson_pre_call':pearson,
+            'duration_pearson_diagnostic':duration_r,
+            'cramers_v':cv,
+            'largest_abs_pre_call_numeric_pair':{'a':max_pair[0],'b':max_pair[1],'r':max_pair[2]},
+            'ordered_month_labelled_blocks':int(len(blocks)),
+            'pseudo_repeat_profile_groups':pseudo_repeat_groups,
+            'pseudo_repeat_profile_rows':pseudo_repeat_rows,
+          }
+          Path('results/audit').mkdir(parents=True,exist_ok=True)
+          Path('results/audit/notebook_01_crosscheck.json').write_text(json.dumps(summary,indent=2))
+          blocks.to_csv('results/audit/notebook_01_ordered_blocks_crosscheck.csv',index=False)
+          print('=== NOTEBOOK 01 INDEPENDENT CROSS-CHECK ===')
+          print(json.dumps(summary,indent=2))
+          print('=== GENERATED EDA FILES ===')
+          for q in sorted(Path('results/eda').glob('*')): print(q)
+          print('=== GENERATED EDA FIGURES ===')
+          for q in sorted(Path('figures/eda').glob('*')): print(q)
+          PY
+      - name: Upload Notebook 01 audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: notebook-01-clean-rerun
+          path: |
+            01_data_eda.executed.ipynb
+            results/eda
+            results/audit/notebook_01_crosscheck.json
+            results/audit/notebook_01_ordered_blocks_crosscheck.csv
+            figures/eda
+          if-no-files-found: error
