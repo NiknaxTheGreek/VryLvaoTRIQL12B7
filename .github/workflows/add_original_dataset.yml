@@ -19,15 +19,8 @@ jobs:
         run: |
           curl -L --fail -o term-deposit-marketing-2020.csv https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv
           echo '396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413  term-deposit-marketing-2020.csv' | sha256sum -c -
-          python - <<'PY'
-          import pandas as pd
-          df=pd.read_csv('term-deposit-marketing-2020.csv')
-          assert df.shape == (40000,14)
-          assert int((df.y=='yes').sum()) == 2896
-          assert int((df.y=='no').sum()) == 37104
-          assert 'y_binary' not in df.columns
-          print('Original dataset verified:', df.shape)
-          PY
+          test "$(wc -l < term-deposit-marketing-2020.csv)" -eq 40001
+          head -n 1 term-deposit-marketing-2020.csv | grep -q '^age,job,marital,education,default,balance,housing,loan,contact,day,month,duration,campaign,y$'
       - name: Commit original dataset
         run: |
           git config user.name 'github-actions[bot]'
