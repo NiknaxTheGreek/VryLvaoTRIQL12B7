@@ -2,39 +2,31 @@
 
 Machine-learning workflow for prioritising which already eligible customers should be called first about a term deposit.
 
-## 1. Project Overview
+## 1. Project overview
 
-This project develops a customer-prioritisation system for a capacity-constrained call centre using 40,000 completed marketing-call records.
+This project analyses 40,000 completed bank marketing calls and develops a ranking model for a capacity-constrained call centre. The target is term-deposit subscription (`y`). There are 2,896 subscribers and 37,104 non-subscribers, so the historical subscription rate is 7.24%.
 
-The target variable is `y`, where `yes` means the customer subscribed to the term deposit and `no` means the customer did not subscribe. Only 2,896 of the 40,000 historical calls resulted in a subscription, giving a 7.24% conversion rate. Because 92.76% of outcomes are non-subscriptions, accuracy alone is not a useful measure of model quality.
+Because an always-`no` classifier would already be 92.76% accurate, accuracy is not the main decision metric. The project focuses on ranking quality using ROC-AUC and PR-AUC, then evaluates business usefulness with period-local call-depth lift and subscriber capture.
 
-The project therefore focuses on whether a model can place more likely subscribers near the top of a ranked call list. Logistic Regression and HistGradientBoosting are compared across exploratory analysis, leakage testing, baseline modelling, tuning, feature reduction, class-imbalance experiments, population analysis, ordered robustness, calibration and business lift.
+The recommended pilot candidate is an **unweighted Logistic Regression model using all 12 valid pre-call predictors**, with HistGradientBoosting retained as a nonlinear challenger. Under the corrected ordered evaluation, Logistic Regression reaches weighted ROC-AUC 0.5663 and weighted PR-AUC 0.1126 across eight eligible later blocks. At 5% call depth it captures 228 subscribers versus about 123 expected under random selection, approximately 1.85× lift.
 
-The final recommendation is an unweighted Logistic Regression model using all 12 pre-call features, with HistGradientBoosting retained as a challenger. Under the corrected forward evaluation, calling the top-ranked 5% of customers across the eight eligible ordered test periods captured 228 subscribers versus about 123 expected under random selection at the same call volume, corresponding to a lift of approximately 1.85.
+These are retrospective results. The model should be tested in a controlled live pilot before broader use.
 
-These results are retrospective and should be validated through a controlled live pilot before broader deployment.
+## 2. Business objective
 
-## 2. Business Objective
+The model does not determine eligibility, approve or reject customers, set prices, guarantee subscription, or replace consent/contact-frequency rules. It ranks already eligible customers from highest to lowest priority:
 
-The model is not intended to determine product eligibility, approve or reject customers, set prices or credit limits, guarantee that a customer will subscribe, or replace contact-frequency or operational rules.
+**eligible customers → model score → ranked list → call highest-ranked customers first → stop at available capacity**
 
-Its intended role is to rank already eligible customers from highest to lowest priority:
+The operational question is therefore: **can the bank obtain more subscriptions from the same calling capacity?**
 
-**eligible customers → model score → ranked list → call highest-ranked customers first → stop when available call-centre capacity is reached**
-
-The business question is therefore:
-
-> Can the bank obtain more subscriptions from the same calling capacity?
-
-Ranking is more useful than a rigid yes/no prediction because the number of customers contacted depends on available capacity, campaign economics and the value of moving further down the ranked list. The main evaluation measures are therefore ROC-AUC, PR-AUC and call-depth lift, supported by precision, recall and F1 where hard-classification behaviour is examined.
-
-## 3. Dataset
+## 3. Dataset and prediction point
 
 | Measure | Value |
 |---|---:|
 | Records | 40,000 |
 | Candidate predictors | 13 |
-| Pre-call predictors | 12 |
+| Valid pre-call predictors | 12 |
 | Subscribers | 2,896 |
 | Non-subscribers | 37,104 |
 | Subscription rate | 7.24% |
@@ -43,200 +35,140 @@ Ranking is more useful than a rigid yes/no prediction because the number of cust
 
 The 12 pre-call predictors are `age`, `job`, `marital`, `education`, `default`, `balance`, `housing`, `loan`, `contact`, `day`, `month` and `campaign`.
 
-`duration` is retained for diagnostic analysis only. It records completed call duration and is therefore unavailable when deciding whom to contact.
+`duration` is the completed call length. It does not exist when the bank decides whom to call, so it is retained only as a diagnostic leakage benchmark and is excluded from every deployable/pre-call model, feature-selection ranking and pre-call association figure.
 
-Explicit `unknown` categories are present in the data:
+The file contains month labels but no verified year, campaign identifier or trustworthy timestamp. Ordered validation is therefore a robustness test across file-ordered campaign conditions, not proof of future-calendar performance.
 
-| Feature | Unknown records | Share |
-|---|---:|---:|
-| `contact` | 12,765 | 31.91% |
-| `education` | 1,531 | 3.83% |
-| `job` | 235 | 0.59% |
+## 4. Quantitative source of truth
 
-The dataset contains month labels but no verified year, campaign identifier or trustworthy timestamp. Ordered evaluation is therefore interpreted as a robustness test across changing campaign conditions rather than definitive future-calendar validation.
+The five executed notebooks are the quantitative source of truth. Numerical claims in the README and reports must trace to these notebook outputs; prose does not override a conflicting executed result.
 
-## 4. Quantitative Source of Truth
+1. `01_data_eda.ipynb` — data integrity, class balance, unknown categories, direct associations and ordered month-labelled exploration.
+2. `02_baseline_tuning.ipynb` — controlled duration comparison, untuned baselines, four searches, selected hyperparameters and untouched-holdout results.
+3. `03_features_imbalance.ipynb` — feature importance, transferred-parameter reduction, imbalance interventions and threshold analysis.
+4. `04_segments_robustness.ipynb` — exploratory higher-conversion population and expanding-window ordered robustness.
+5. `05_final_validation_reporting.ipynb` — calibration, period-local lift and final reporting summaries.
 
-The five executed notebooks are the quantitative source of truth for this repository. Numerical claims in the README and the two PDF reports should be traceable to executed notebook outputs; a prose report must not override a conflicting notebook result.
+The repository is intentionally flat. No folder hierarchy, standalone `.py` scripts or HTML exports are required for the final published submission.
 
-The notebooks are reviewed in this order:
+The notebooks contain stored executed outputs, but the current eight-file repository does not contain the original CSV or the intermediate `results/` and `figures/` files referenced by some reader cells. A fresh clone is therefore reviewable but is not claimed to be a fully self-contained clean-rerun environment.
 
-1. `01_data_eda.ipynb` — data inspection, class balance, missing/`unknown` handling, direct associations and ordered month-labelled exploration.
-2. `02_baseline_tuning.ipynb` — untuned leakage baselines, pre-call baselines, four hyperparameter searches and selected configurations.
-3. `03_features_imbalance.ipynb` — class-imbalance interventions, threshold analysis, feature importance and reduced-feature comparisons.
-4. `04_segments_robustness.ipynb` — exploratory population analysis and expanding-window ordered validation.
-5. `05_final_validation_reporting.ipynb` — final validation summaries, calibration, period-local lift and reporting outputs.
+## 5. Verified modelling sequence
 
-A Phase 5 result is frozen only when its upstream model configuration is verified. If a selected Phase 4 configuration is later corrected, every downstream result that depends on that configuration is automatically reclassified as **requires rerun** until regenerated. Stored downstream numbers are never canonised merely because they appear in an executed notebook or report.
+1. **Untuned leakage baseline:** fit Logistic Regression and HistGradientBoosting using all 12 pre-call variables plus `duration`.
+2. **Untuned pre-call baseline:** remove only `duration` and keep the same model defaults.
+3. **Independent tuning:** tune LR pre-call, LR with duration, HGB pre-call and HGB with duration separately.
+4. **Imbalance/operating-point study:** evaluate the selected tuned pre-call structures under no adjustment, class weighting, random oversampling, random undersampling, SMOTENC and nested threshold optimisation. Threshold optimisation changes the cutoff, not the ranking.
+5. **Feature reduction:** transfer the selected full-model hyperparameters unchanged to Top-3, Top-4 and Top-5 predictor sets; do not retune reduced models.
+6. **Exploratory higher-conversion population:** transfer the already-selected **tuned full-population pre-call model unchanged** into the subgroup. No subgroup-specific tuning is performed.
+7. **Ordered robustness:** evaluate tuned, unweighted, all-12 pre-call LR and HGB across expanding later blocks without block-specific retuning.
+8. **Downstream diagnostics:** evaluate calibration, call-depth lift and pseudo-profile sensitivity after the ranking analysis; these do not retroactively select the model.
 
-The published notebooks contain executed outputs. The current flat repository does not include the original CSV or the intermediate `results/` and `figures/` artifacts referenced by some notebook cells, so a fresh clone is reviewable but is not a completely self-contained clean rerun environment. That execution dependency is separate from the repository layout: the absence of folders, HTML exports or standalone `.py` scripts is not treated as a defect in the published submission.
+### Why tuned transfer is canonical for the exploratory population
 
-## 5. Verified Modelling Sequence
+The subgroup analysis asks an operational question: **does the already-selected global model still rank usefully inside a historically higher-response population?** The canonical model rows are therefore the **Tuned transfer** rows, where the full-population tuned configuration is transferred unchanged.
 
-The modelling sequence was audited against the executed notebooks and the computational code retained in the repository history.
+Untuned full-population baselines are retained only as contextual comparators. They are not the canonical subgroup model because the intended pilot would not discard the globally selected configuration when entering the segment. Equally, the subgroup is **not retuned**: avoiding subgroup-specific hyperparameter selection reduces overfitting risk in a smaller, data-derived population and keeps the test aligned with how the global production candidate would actually be applied.
 
-### Step 1 — Untuned leakage baselines
+The exploratory rule is:
 
-Both model families are first evaluated using all 12 pre-call predictors plus `duration`. The purpose is diagnostic: completed-call duration is known to be unavailable at the pre-call decision point, so this comparison measures how strongly a post-call variable can inflate retrospective performance.
+`contact = cellular AND (job = retired OR age >= 71 OR balance >= Q3)`
 
-### Step 2 — Untuned deployable baselines
+with `Q3(balance)=1319`. It contains 6,774 customers and 778 subscribers, an 11.49% historical response rate versus 7.24% overall.
 
-`duration` is removed and the same untuned model defaults are evaluated on the 12 deployable pre-call predictors. This makes the leakage comparison controlled: the predictor set changes, not the baseline model configuration.
+Canonical transferred-model results from Notebook 04 are:
 
-### Step 3 — Tune four model/predictor configurations
+| Model | Configuration | ROC-AUC | PR-AUC | Brier |
+|---|---|---:|---:|---:|
+| Logistic Regression | Tuned transfer | 0.6928 | 0.2863 | 0.0928 |
+| HistGradientBoosting | Tuned transfer | 0.7152 | 0.3090 | 0.0907 |
 
-Four searches are run separately:
+These results do **not** justify a separate subgroup model or automatic eligibility rule. The segment remains exploratory and suitable for pilot stratification/monitoring only.
 
-- Logistic Regression, pre-call;
-- Logistic Regression, with duration;
-- HistGradientBoosting, pre-call;
-- HistGradientBoosting, with duration.
+## 6. Baseline configurations and tuning
 
-Hyperparameter selection uses PR-AUC as the primary validation metric and ROC-AUC as the tie-break. The untouched final holdout is not used to choose hyperparameters.
+### Logistic Regression
 
-### Step 4 — Class-imbalance and threshold experiments on tuned pre-call models
+Untuned baseline:
 
-The selected tuned pre-call model structures are held fixed while six approaches are compared:
+`LogisticRegression(C=1, max_iter=100, tol=1e-4, random_state=42)`
 
-1. no adjustment / unweighted;
-2. class weighting;
-3. random oversampling;
-4. random undersampling;
-5. SMOTENC;
-6. nested threshold optimisation.
+with scikit-learn defaults supplying L2 regularisation, `class_weight=None` and the default solver. The identical baseline settings are used with and without `duration`.
 
-The structural hyperparameters are not retuned inside these arms. Class weighting, oversampling, undersampling and SMOTENC alter fitting or the training distribution; threshold optimisation is different because it leaves the score ordering unchanged and selects a decision cutoff from inner out-of-fold predictions. It is therefore one of the six evaluated imbalance/operating-point approaches, but it is not a resampling strategy.
+Tuned search per predictor condition:
 
-### Step 5 — Feature reduction
-
-The reduced feature sets are selected directly from the HistGradientBoosting permutation-importance ranking measured by PR-AUC decrease on a stratified holdout:
-
-- Top 3: `month`, `contact`, `day`;
-- Top 4: `month`, `contact`, `day`, `housing`;
-- Top 5: `month`, `contact`, `day`, `housing`, `age`;
-- All 12: every valid pre-call predictor.
-
-Pearson correlations, Cramér's V and Logistic Regression grouped coefficients are supporting interpretation only; they were not combined into a formal ranking to choose the tested subsets.
-
-The already selected full-model hyperparameters are transferred unchanged to those reduced predictor sets; the reduced models are not retuned. The comparison therefore tests whether fewer predictors preserve ranking performance rather than giving reduced models an additional tuning advantage.
-
-### Step 6 — Exploratory higher-conversion population
-
-The exploratory rule `contact = cellular AND (job = retired OR age >= 71 OR balance >= Q3)` identifies 6,774 customers and 778 subscribers, giving an observed 11.49% conversion rate versus 7.24% overall.
-
-The canonical modelling test for this population uses the **full-population tuned pre-call parameters transferred unchanged into the population**. This is deliberate: the question is whether the already-selected global models transfer into the higher-conversion population, not whether untuned defaults happen to work there. No subgroup-specific hyperparameter search is performed, so the analysis remains a transfer test rather than a separately tuned segment model.
-
-The notebook also contains untuned **Baseline** rows. Those are retained only as a reference comparison; they are not the canonical population configuration. The segment balance-Q3 cutoff is learned inside each training fold, which is why the modelling comparison covers 6,772 fold-eligible observations rather than the 6,774 rows in the static full-data descriptive summary.
-
-### Step 7 — Expanding-window ordered validation
-
-The ordered robustness test uses the tuned, unweighted, full-12-feature pre-call Logistic Regression and HistGradientBoosting models. Hyperparameters are fixed before the expanding-window evaluation; they are not retuned within each later test block.
-
-A test block is eligible only when at least 5,000 earlier training rows and at least 100 positive and 100 negative test outcomes are available. Eight blocks satisfy the gate. The primary ordered ROC-AUC is weighted by test-block size.
-
-The executed ordered summary is:
-
-| Metric | Logistic Regression | HistGradientBoosting |
-|---|---:|---:|
-| Eligible periods | 8 | 8 |
-| Test rows | 30,526 | 30,526 |
-| Test positives | 2,457 | 2,457 |
-| Weighted ordered ROC-AUC | 0.5663 | 0.5530 |
-| Weighted ordered PR-AUC | 0.1126 | 0.0968 |
-
-### Step 8 — Calibration and sensitivity analyses
-
-Calibration, period-local call-depth lift and pseudo-profile/group sensitivity are reported after the ordered ranking analysis. They answer different questions and are not used to retroactively select the model or ordered-validation hyperparameters.
-
-## 6. Baseline Configurations and Hyperparameter Tuning
-
-### Logistic Regression baseline
-
-The untuned Logistic Regression baseline uses `C=1`, L2 regularisation, no class weighting and the standard unweighted fit. The same baseline configuration is used for the pre-call and with-duration comparisons.
-
-The explicit constructor in the computational notebook is equivalent to:
-
-```text
-LogisticRegression(C=1, max_iter=100, tol=1e-4, random_state=42)
-```
-
-with the remaining scikit-learn defaults supplying L2 regularisation, `class_weight=None` and the default solver.
-
-### Logistic Regression search
-
-Each Logistic Regression predictor condition evaluates the exhaustive grid:
-
-- `C`: 15 logarithmically spaced values from 0.001 to 100;
+- `C = np.logspace(-3, 2, 15)`;
 - penalty: L1 or L2;
 - class weight: `None` or `balanced`;
-- solver: `liblinear` for the tuned search;
-- deterministic seed: 42.
+- solver: `liblinear`;
+- seed: 42.
 
-This is `15 × 2 × 2 = 60` candidate configurations per predictor condition and 120 Logistic Regression candidates in total.
+This gives 60 candidates per LR condition and 120 LR candidates overall. `C=1` is the untuned baseline value but is **not** one of the 15 values in that logarithmic grid.
 
-`C=1` is the baseline value but is **not** one of the 15 values produced by `np.logspace(-3, 2, 15)`. It should therefore not be described as a tuned-grid candidate.
-
-The selected Logistic Regression configurations are:
+Selected LR configurations:
 
 | Predictor condition | Selected configuration |
 |---|---|
 | Pre-call | L2, `C=8.4834289824`, unweighted |
 | With duration | L2, `C=0.1389495494`, unweighted |
 
-### HistGradientBoosting baseline
+### HistGradientBoosting
 
-The untuned HistGradientBoosting baseline uses 100 boosting iterations, learning rate 0.10, 31 maximum leaf nodes, L2 regularisation 0, minimum leaf size 20 and no class weighting, with seed 42. `max_depth` is left at its default `None`.
+Untuned baseline:
 
-### HistGradientBoosting search
+- `max_iter=100`
+- `max_depth=None`
+- `learning_rate=0.10`
+- `max_leaf_nodes=31`
+- `l2_regularization=0`
+- `min_samples_leaf=20`
+- `class_weight=None`
+- `random_state=42`
 
-The full candidate space is:
+Search space:
 
-- `max_iter`: 50, 100, 150, 200, 300, 400;
-- `max_depth`: 3, 4, 5, 6, 8, `None`;
-- `learning_rate`: 0.01, 0.03, 0.05, 0.10, 0.20;
-- `max_leaf_nodes`: 15, 31, 63, 127;
-- `l2_regularization`: 0, 0.1, 0.5, 1, 2;
-- `min_samples_leaf`: 10, 20, 30, 50;
-- `class_weight`: `None`, `balanced`.
+- `max_iter`: 50, 100, 150, 200, 300, 400
+- `max_depth`: 3, 4, 5, 6, 8, `None`
+- `learning_rate`: 0.01, 0.03, 0.05, 0.10, 0.20
+- `max_leaf_nodes`: 15, 31, 63, 127
+- `l2_regularization`: 0, 0.1, 0.5, 1, 2
+- `min_samples_leaf`: 10, 20, 30, 50
+- `class_weight`: `None`, `balanced`
 
-This gives `6 × 6 × 5 × 4 × 5 × 4 × 2 = 28,800` possible combinations. For each predictor condition, 100 candidates are sampled reproducibly using `ParameterSampler(..., n_iter=100, random_state=42)`.
+The full HGB space has 28,800 combinations. One hundred candidates are sampled independently for each predictor condition with `ParameterSampler(..., n_iter=100, random_state=42)`.
 
-The same seeded candidate list is evaluated independently for the pre-call and with-duration conditions. Candidate 79 ranks first in both searches; the shared winning configuration is therefore an empirical result of the two searches, not a configuration copied from one condition to the other:
+The same winning structure appears independently in both HGB searches:
 
-```text
-max_iter=200
-max_depth=8
-learning_rate=0.05
-max_leaf_nodes=15
-l2_regularization=0
-min_samples_leaf=20
-class_weight=None
-```
+`max_iter=200, max_depth=8, learning_rate=0.05, max_leaf_nodes=15, l2_regularization=0, min_samples_leaf=20, class_weight=None`
 
-### Validation design used for tuning
+### Tuning validation design
 
-The data are split into an 80% development set and a 20% untouched final holdout. Within development, the tuning-train and tuning-validation partitions contain 24,000 and 8,000 rows respectively. Logistic Regression candidates are fitted on the tuning-train split. HistGradientBoosting candidate screening uses a reproducible stratified 10,000-row subsample of the tuning-train data against the same 8,000-row validation set, after which the selected HGB candidate is refitted on the full 24,000-row tuning-train split.
+The data are split into 32,000 development rows and an untouched 8,000-row final holdout. Within development, LR tuning uses 24,000 training rows and 8,000 validation rows. HGB screening uses a reproducible stratified 10,000-row subsample of the tuning-train data against the same 8,000-row validation set, after which the selected HGB candidate is refit on the full development training data used by the workflow.
 
-Candidate ranking is by validation PR-AUC first and validation ROC-AUC second.
+PR-AUC is the primary selection metric and ROC-AUC is the tie-break. Across the four independent searches there are **320 candidate configurations**: 60 + 60 LR and 100 + 100 HGB. This is a candidate count, not “320 CV fits”.
 
-The four searches therefore contain **320 candidate configurations** in total:
+## 7. Phase 5 — reconciled performance results
 
-- 60 LR pre-call;
-- 60 LR with duration;
-- 100 HGB pre-call;
-- 100 HGB with duration.
+The current executed Notebook 02 holdout table is canonical for the baseline/tuned comparison. Older stored audit rows that disagree with this current notebook generation are superseded rather than averaged or mixed.
 
-The number 320 refers to candidate configurations evaluated by the four searches. It should not be described as 320 cross-validation fits.
+| Model | Stage | Predictors | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC |
+|---|---|---|---:|---:|---:|---:|---:|---:|
+| LR | Untuned | Pre-call | 0.9282 | 0.5758 | 0.0328 | 0.0621 | 0.7112 | 0.2417 |
+| LR | Untuned | + duration | 0.9381 | 0.6556 | 0.3057 | 0.4170 | 0.9324 | 0.5250 |
+| HGB | Untuned | Pre-call | 0.9280 | 0.5349 | 0.0397 | 0.0740 | 0.7341 | 0.2683 |
+| HGB | Untuned | + duration | 0.9411 | 0.6399 | 0.4266 | 0.5119 | 0.9515 | 0.5852 |
+| LR | Tuned | Pre-call | 0.9281 | 0.5588 | 0.0328 | 0.0620 | 0.7097 | 0.2403 |
+| LR | Tuned | + duration | 0.9375 | 0.6537 | 0.2902 | 0.4019 | 0.9330 | 0.5232 |
+| HGB | Tuned | Pre-call | 0.9275 | 0.4737 | 0.0155 | 0.0301 | 0.7299 | 0.2698 |
+| HGB | Tuned | + duration | 0.9414 | 0.6580 | 0.3955 | 0.4941 | 0.9511 | 0.5815 |
 
-## 7. Key Results
+The key result is not that tuning creates a large gain—it does not. The dominant retrospective jump comes from `duration`, which is unavailable at the pre-call decision point.
 
-HistGradientBoosting performs better under shuffled historical evaluation, while Logistic Regression is more robust across later ordered campaign conditions and produces stronger historical lift at the tested call depths.
+## 8. Phase 6 — duration policy and direct associations
 
-### Duration leakage and direct associations
+### Pearson correlation
 
-`duration` has Pearson correlation `+0.4612` with the target, far larger than any valid numeric pre-call predictor. It is nevertheless diagnostic only because final call length does not exist when the bank chooses whom to contact.
-
-The valid numeric pre-call Pearson correlations, ranked by absolute magnitude, are:
+Valid pre-call numeric correlations with the target, ranked by absolute magnitude:
 
 | Feature | Pearson r |
 |---|---:|
@@ -245,9 +177,13 @@ The valid numeric pre-call Pearson correlations, ranked by absolute magnitude, a
 | `age` | -0.0203 |
 | `day` | -0.0064 |
 
-There is no fifth valid numeric pre-call predictor. `duration` must not be included in the deployable Pearson figure or feature-selection ranking.
+There is no fifth valid numeric pre-call predictor.
 
-The strongest categorical associations are:
+Diagnostic only: `duration = +0.4612`.
+
+The large `duration` relationship is useful for demonstrating the size of outcome-proximate information, but timing—not merely the metric drop when it is removed—is why it is excluded from pre-call deployment.
+
+### Cramér's V
 
 | Feature | Cramér's V |
 |---|---:|
@@ -257,30 +193,48 @@ The strongest categorical associations are:
 | `marital` | 0.0579 |
 | `housing` | 0.0541 |
 
-These values describe direct univariate association; they are not themselves a feature-selection rule.
+These are descriptive univariate associations, not causal effects and not the rule used to create reduced feature sets.
 
-### Untouched-holdout baseline and tuned ranking results
+For publication, the Pearson visual should contain only the four valid pre-call numeric predictors; `duration` belongs in a separately labelled diagnostic comparison. The Cramér's V visual should use the five values above. Confusion-matrix-style association graphics are not appropriate for these quantities.
 
-The leakage comparison must distinguish baseline from tuned models and pre-call from duration-inclusive models. On the common untouched 20% holdout:
+## 9. Phase 7 — feature importance and reduction
 
-| Model | Stage | Predictors | ROC-AUC | PR-AUC |
-|---|---|---|---:|---:|
-| LR | Untuned | Pre-call | 0.7112 | 0.2417 |
-| LR | Untuned | + duration | 0.9324 | 0.5250 |
-| HGB | Untuned | Pre-call | 0.7341 | 0.2683 |
-| HGB | Untuned | + duration | 0.9515 | 0.5852 |
-| LR | Tuned | Pre-call | 0.7097 | 0.2403 |
-| LR | Tuned | + duration | 0.9330 | 0.5232 |
-| HGB | Tuned | Pre-call | 0.7299 | 0.2698 |
-| HGB | Tuned | + duration | 0.9511 | 0.5815 |
+Three forms of evidence are kept separate because they answer different questions.
 
-Tuning changes these holdout ranking metrics only modestly. The major performance jump is caused by including post-call `duration`, not by hyperparameter optimisation. All deployable analyses therefore exclude `duration`.
+### Logistic Regression grouped coefficient magnitude
 
-### Feature importance and reduction
+| Feature | Importance |
+|---|---:|
+| `month` | 0.9579 |
+| `contact` | 0.4748 |
+| `loan` | 0.3444 |
+| `default` | 0.3444 |
+| `housing` | 0.3444 |
 
-Logistic Regression grouped coefficient importance and HGB permutation importance answer different questions. The leading LR grouped coefficient magnitudes are `month` 0.9579, `contact` 0.4748, and a three-way displayed tie at 0.3444 for `loan`, `default` and `housing`. The HGB permutation ranking used to define the tested reduced subsets is `month` 0.1478, `contact` 0.1051, `day` 0.0559, `housing` 0.0348 and `age` 0.0144.
+`loan`, `default` and `housing` are tied at the displayed precision.
 
-The transferred-parameter feature-reduction results are:
+### HGB permutation importance
+
+Measured on a stratified 30% holdout using decrease in PR-AUC:
+
+| Feature | Importance |
+|---|---:|
+| `month` | 0.1478 |
+| `contact` | 0.1051 |
+| `day` | 0.0559 |
+| `housing` | 0.0348 |
+| `age` | 0.0144 |
+
+The **HGB permutation order directly defines the tested nested subsets**:
+
+- Top 3: `month`, `contact`, `day`
+- Top 4: `month`, `contact`, `day`, `housing`
+- Top 5: `month`, `contact`, `day`, `housing`, `age`
+- All 12: every valid pre-call predictor
+
+Pearson, Cramér's V and LR coefficients support interpretation only. The project does **not** claim that a formal combined-evidence ranking generated the feature sets.
+
+Selected full-model hyperparameters are transferred unchanged to each reduced set. Reduced models are not retuned, so the comparison isolates predictor removal rather than mixing removal with a new search.
 
 | Model | Metric | Top 3 | Top 4 | Top 5 | All 12 |
 |---|---|---:|---:|---:|---:|
@@ -289,71 +243,35 @@ The transferred-parameter feature-reduction results are:
 | HGB | ROC-AUC | 0.7036 | 0.7062 | 0.7072 | **0.7153** |
 | HGB | PR-AUC | 0.2439 | **0.2463** | 0.2446 | 0.2447 |
 
-`month` and `contact` are the clearest consensus features. `day` has almost no direct Pearson relationship yet ranks third under HGB permutation importance, which is consistent with nonlinear or interaction value. `housing` contributes across direct association and model-based views, while `age` has weak direct Pearson correlation but measurable HGB permutation value.
+All 12 predictors give the best ROC-AUC for both families and the best LR PR-AUC. HGB Top-4 has a very small PR-AUC edge over HGB All-12 (0.2463 vs 0.2447), but that isolated difference is not enough to justify discarding the broader feature set. The all-12 models remain the primary candidates for ordered robustness, where stability across later campaign conditions matters more than a small shuffled-holdout difference.
 
-All 12 predictors give the best ROC-AUC for both model families and the best LR PR-AUC. HGB Top 4 exceeds All 12 PR-AUC by only 0.0016 while its ROC-AUC is 0.0091 lower. That small PR-AUC difference is insufficient evidence to discard eight predictors, so the pilot configuration retains all 12 valid pre-call predictors.
+## 10. Ordered robustness
 
-### Class imbalance and threshold behaviour
+The expanding-window analysis uses tuned, unweighted, all-12 pre-call models without block-specific retuning. Eight later blocks meet the predeclared eligibility gate.
 
-The notebook comparison shows that weighting and resampling mainly move the precision/recall operating point rather than creating a large, consistent ranking gain. For HGB, random oversampling raises ROC-AUC from 0.7153 to 0.7191 and PR-AUC from 0.2447 to 0.2505, but accuracy falls from 0.9276 to 0.7507 and precision from 0.5086 to 0.1557. SMOTENC degrades ranking for both model families.
+| Metric | Logistic Regression | HistGradientBoosting |
+|---|---:|---:|
+| Eligible periods | 8 | 8 |
+| Test rows | 30,526 | 30,526 |
+| Test positives | 2,457 | 2,457 |
+| Weighted ROC-AUC | **0.5663** | 0.5530 |
+| Weighted PR-AUC | **0.1126** | 0.0968 |
 
-Nested threshold optimisation gives the strongest hard-classification F1 in this comparison: 0.2744 for LR and 0.3220 for HGB. Because threshold optimisation changes the binary cutoff rather than the score ordering, LR ROC-AUC/PR-AUC remain 0.6848/0.2154 and HGB remain 0.7153/0.2447.
+The reversal relative to shuffled historical evaluation is central to the final model choice: the nonlinear challenger looks stronger in mixed historical data, but Logistic Regression is more reliable in the later ordered blocks.
 
-For the ranking pilot, the unweighted model remains the operating form and call depth is selected from capacity and economics rather than a universal 0.5 probability cutoff.
+## 11. Class imbalance and threshold policy
 
-### Shuffled versus ordered validation
+Class weighting and resampling mainly change the precision/recall trade-off. They do not provide a compelling improvement in score ordering. SMOTENC degrades ranking performance for both model families. Nested threshold optimisation gives the strongest hard-classification F1 while leaving ROC-AUC/PR-AUC unchanged because it changes the cutoff rather than the ranking.
 
-The tuned, unweighted pre-call models show a clear validation-regime reversal:
+For a capacity-constrained call centre, the preferred operating policy is therefore to keep the ranking model unweighted and choose a call depth based on available capacity and pilot economics.
 
-| Model | Shuffled ROC-AUC | Shuffled PR-AUC | Weighted ordered ROC-AUC | Weighted ordered PR-AUC |
-|---|---:|---:|---:|---:|
-| LR | 0.6848 | 0.2154 | **0.5663** | **0.1126** |
-| HGB | **0.7153** | **0.2447** | 0.5530 | 0.0968 |
+## 12. Final recommendation
 
-HGB is stronger on row-stratified shuffled folds, but LR is stronger across the eight eligible later ordered blocks. The ordered comparison is therefore the more relevant robustness evidence for selecting the pilot ranker.
+Use the unweighted all-12-feature Logistic Regression as the pilot champion and HGB as a challenger. Apply normal eligibility/consent rules before scoring, rank eligible customers by model score, call from the top of the list to the available capacity, and measure realised subscription rate, lift, complaints, opt-outs and segment composition against a control arm.
 
-### Calibration and pseudo-profile sensitivity
+The exploratory high-response population can be used for stratification and monitoring, but not as an automatic exclusion rule or separately tuned production model.
 
-Across the eight eligible ordered periods, the observed subscription rate is 8.05%. LR's mean score is 7.54%, with period-weighted Brier score 0.0748 and ECE 0.0444. HGB's mean score is 4.93%, with Brier score 0.0741 and ECE 0.0337. These diagnostics do not justify treating either score as a literal subscription probability; prospective recalibration is required.
-
-A pseudo-profile grouped five-fold sensitivity using `age + job + marital + education + balance` leaves ranking results almost unchanged: LR ROC-AUC/PR-AUC are 0.6850/0.2157 and HGB are 0.7151/0.2444. Because the dataset has no true customer identifier, this is only a dependence sensitivity check and cannot prove customer-level independence.
-
-### Exploratory population
-
-The static full-data exploratory rule contains 6,774 customers and 778 subscribers, a historical subscription rate of 11.49%. In the fold-defined modelling comparison the eligible masks contain 6,772 observations because the balance-Q3 cutoff is learned within each training fold.
-
-The canonical population results are the **Tuned transfer** rows, which use the globally selected pre-call hyperparameters unchanged and perform no subgroup-specific tuning:
-
-| Model | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC |
-|---|---:|---:|---:|---:|---:|---:|
-| LR tuned transfer | 0.8844 | 0.4576 | 0.0347 | 0.0645 | 0.6928 | 0.2863 |
-| HGB tuned transfer | 0.8845 | 0.4545 | 0.0257 | 0.0487 | 0.7152 | 0.3090 |
-
-Untuned baseline rows remain useful as a reference but are not the primary population test. The purpose of this section is to test transfer of the selected global modelling choices into an exploratory higher-conversion population, not to optimize a separate segment model.
-
-### Ordered robustness and lift
-
-Across the eight eligible expanding-window periods, weighted ordered ROC-AUC is 0.5663 for Logistic Regression and 0.5530 for HistGradientBoosting. Period-local lift is stronger for Logistic Regression at the tested call depths; at 5% call depth it captures 228 subscribers compared with about 123 expected under random selection at the same call volume, a lift of approximately 1.85. At 20% depth it captures 689 subscribers versus about 492 expected randomly, corresponding to lift 1.4009.
-
-The forward scores are useful for ranking but should not yet be treated as exact subscription probabilities. Prospective recalibration is required before probability-based expected-value or revenue calculations.
-
-## 8. Final Recommendation
-
-The recommended pilot model is **unweighted Logistic Regression using all 12 pre-call features**.
-
-The model should be used to **rank already eligible customers from highest to lowest priority**, not as a rigid `yes/no` classifier. The number of customers contacted should be determined by available call-centre capacity, campaign economics and the observed value of moving further down the ranked list.
-
-HistGradientBoosting should be retained as a **challenger model**. It performs better under shuffled historical evaluation, but Logistic Regression shows stronger robustness across later ordered campaign conditions and produces higher historical lift at the call depths tested.
-
-The current model scores should be interpreted as **relative ranking scores rather than exact subscription probabilities**. A higher score supports calling one customer before another, but it should not yet be converted directly into a claimed probability of subscription or expected profit.
-
-The next step is a **controlled live pilot testing whether Logistic-Regression-based customer prioritisation produces better business outcomes than the most appropriate available benchmark at the same calling effort**—either the bank's existing targeting process, if one is clearly defined, or random selection from the same eligible customer pool if no reliable process exists.
-
-Broader deployment should occur only if the pilot shows that model-based prioritisation delivers more subscriptions for the same calling effort and produces positive business value without unacceptable operational or customer outcomes.
-
-## 9. Repository Structure
-
-The published repository is a flat submission bundle. No folder hierarchy, standalone `.py` scripts or HTML notebook exports are required for this version.
+## 13. Repository structure
 
 ```text
 VryLvaoTRIQL12B7/
@@ -367,26 +285,4 @@ VryLvaoTRIQL12B7/
 └── Business_Recommendations.pdf
 ```
 
-The five `.ipynb` files are the analytical artifacts and contain code together with executed outputs. The two PDFs are presentation layers derived from the analysis. The README documents the project logic, verified modelling sequence, selected configurations and submission contents.
-
-## 10. Reviewing the Analysis
-
-For review, open the notebooks in numerical order from `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb`. Their embedded executed outputs provide the quantitative evidence used by the project.
-
-A completely clean rerun from a fresh clone requires the original source dataset and any intermediate result artifacts expected by the notebook cells; those dependencies are not included in the current flat repository. This README therefore does not claim that the published eight-file bundle is independently executable from scratch.
-
-If the analysis is rerun in a full working environment, preserve the documented predictor definitions, random seed, tuning design, selection metrics and modelling sequence so that newly generated results remain comparable with the audited outputs.
-
-## 11. Limitations and Next Steps
-
-The main limitation is that the historical dataset does not contain verified years, campaign identifiers or trustworthy timestamps. The ordered evaluation therefore tests robustness across changing campaign conditions, but it cannot prove true future-calendar performance.
-
-The available predictors are also limited. The dataset does not include richer CRM history such as previous contact outcomes, time since prior contact or broader customer relationship information. In addition, `contact=unknown` affects approximately 31.9% of records, making it an important data-quality issue for future campaigns.
-
-The source data contain no true customer identifier. A pseudo-profile grouping based on `age + job + marital + education + balance` is therefore only a sensitivity check and cannot prove customer-level independence.
-
-The model scores are useful for ranking, but they should not yet be treated as exact subscription probabilities. Prospective campaign data would be needed for stronger calibration and for reliable expected-value or profitability calculations.
-
-The next step is a controlled live pilot of the selected Logistic Regression prioritisation approach, with HistGradientBoosting retained as a challenger. The pilot should compare outcomes at equal calling effort, record reliable campaign and operational data, and measure incremental subscriptions, cost per acquisition, realised lift and customer outcomes.
-
-Future iterations should focus on better data before greater model complexity. Reliable campaign dates, campaign IDs, previous contact history, previous campaign outcomes, clearer contact-channel information and richer CRM variables are likely to provide more value than repeatedly tuning the same historical feature set.
+This flat structure is intentional for the final portfolio submission.
