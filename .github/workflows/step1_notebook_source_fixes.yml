@@ -28,7 +28,9 @@ jobs:
           new = 'if cell["cell_type"] == "markdown" and i > 0:\n            s = heading(cell).lower()'
           if old not in s:
               raise SystemExit('Expected find_md implementation not found')
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          s = s.replace('mi = find_md(nb, "target balance", "explicit unknown")', 'mi = find_md(nb, "4. target balance")', 1)
+          p.write_text(s)
           PY
           python step1_apply.py
 
