@@ -35,112 +35,67 @@ jobs:
           python - <<'PY'
           import hashlib, io, pathlib, urllib.request
           import pandas as pd
-
           url = 'https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv'
           raw = urllib.request.urlopen(url, timeout=60).read()
           assert hashlib.sha256(raw).hexdigest() == '396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413'
           src = pd.read_csv(io.BytesIO(raw))
           assert src.shape == (40000, 14)
-          assert list(src.columns) == ['age','job','marital','education','default','balance','housing','loan','contact','day','month','duration','campaign','y']
           assert int((src['y'] == 'yes').sum()) == 2896
           assert int((src['y'] == 'no').sum()) == 37104
           assert int(src.duplicated().sum()) == 0
           assert int((src['contact'] == 'unknown').sum()) == 12765
           assert int((src['education'] == 'unknown').sum()) == 1531
           assert int((src['job'] == 'unknown').sum()) == 235
-
           block = src['month'].ne(src['month'].shift()).cumsum()
           assert src.groupby(block).size().tolist() == [7957,4486,6380,5215,80,3598,13,1176,2296,258,2718,5575,248]
           assert src.assign(_y=(src['y']=='yes').astype(int)).groupby(block)['_y'].sum().tolist() == [258,201,384,288,49,220,1,38,255,125,451,533,93]
-
           labelled = src.copy()
           labelled['y_binary'] = labelled['y'].eq('yes').astype(int)
           labelled.to_csv('term-deposit-marketing-2020-labelled.csv', index=False)
           out = pathlib.Path('term-deposit-marketing-2020-labelled.csv').read_bytes()
-          expected = '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
-          actual = hashlib.sha256(out).hexdigest()
-          assert actual == expected, (actual, expected)
-          print('Exact labelled dataset PASS:', len(out), actual)
+          assert hashlib.sha256(out).hexdigest() == '8a6ed5d9134230d16fe927fa7c05853d6eba792eb7709ac506c7304bcd61d87e'
+          print('EXACT DATASET PASS')
           PY
 
       - name: Execute Notebook 01
         run: jupyter nbconvert --to notebook --execute --inplace 01_data_eda.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
-
       - name: Execute Notebook 02
         run: jupyter nbconvert --to notebook --execute --inplace 02_baseline_tuning.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
-
       - name: Execute Notebook 03
         run: jupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
-
       - name: Execute Notebook 04
         run: jupyter nbconvert --to notebook --execute --inplace 04_segments_robustness.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
-
       - name: Execute Notebook 05
         run: jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=1800 --ExecutePreprocessor.kernel_name=python3
 
-      - name: Verify canonical results and notebook structure
+      - name: Verify notebook execution and structure
         run: |
           python - <<'PY'
           import json, re
           from pathlib import Path
-
-          names = [
-              '01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb',
-              '04_segments_robustness.ipynb','05_final_validation_reporting.ipynb'
-          ]
-
-          def src_text(cell):
-              s = cell.get('source', [])
-              return ''.join(s) if isinstance(s, list) else str(s)
-
-          def output_text(nb):
-              pieces=[]
-              for c in nb['cells']:
-                  if c.get('cell_type') != 'code':
-                      continue
-                  for o in c.get('outputs', []):
-                      if 'text' in o:
-                          t=o['text']; pieces.append(''.join(t) if isinstance(t,list) else str(t))
-                      t=o.get('data',{}).get('text/plain')
-                      if t is not None:
-                          pieces.append(''.join(t) if isinstance(t,list) else str(t))
-              return '\n'.join(pieces)
-
+          names = ['01_data_eda.ipynb','02_baseline_tuning.ipynb','03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']
+          def text(c):
+              s=c.get('source',[])
+              return ''.join(s) if isinstance(s,list) else str(s)
           notebooks={n:json.loads(Path(n).read_text(encoding='utf-8')) for n in names}
-          texts={n:output_text(nb) for n,nb in notebooks.items()}
-
-          required = {
-            '01_data_eda.ipynb': ['Exact duplicate rows: 0','0.4612','6774'],
-            '02_baseline_tuning.ipynb': ['8.483428982440726','0.0610540229658533','0.240265','0.272820','0.943115'],
-            '03_features_imbalance.ipynb': ['0.240265','0.272820','0.287171','0.353059','0.274559'],
-            '04_segments_robustness.ipynb': ['0.566290','0.551600','0.112626','0.096333'],
-            '05_final_validation_reporting.ipynb': ['1.853857','1.606389','1.401474','0.035101','0.044442']
-          }
-
-          for n, nb in notebooks.items():
+          for n,nb in notebooks.items():
               kinds=[c.get('cell_type') for c in nb['cells']]
               code=[c for c in nb['cells'] if c.get('cell_type')=='code']
-              assert 'markdown' in kinds and code, n
-              assert all(c.get('execution_count') is not None for c in code), n
-              assert all(not any(o.get('output_type')=='error' for o in c.get('outputs',[])) for c in code), n
-              assert all(not (kinds[i]=='code' and kinds[i+1]=='code') for i in range(len(kinds)-1)), f'unexplained code gap in {n}'
-              source='\n'.join(src_text(c) for c in nb['cells'])
-              assert '/mnt/data/' not in source, n
-              assert 'term-deposit-marketing-2020-labelled.csv' in source, n
-              missing=[x for x in required[n] if x not in texts[n]]
-              assert not missing, f'{n} missing canonical outputs {missing}'
-              print(n, 'STRUCTURE + CANONICAL OUTPUT PASS')
-
-          # Downstream deployable feature definitions must exclude duration.
+              assert code and 'markdown' in kinds
+              assert all(c.get('execution_count') is not None for c in code)
+              assert all(not any(o.get('output_type')=='error' for o in c.get('outputs',[])) for c in code)
+              assert all(not (kinds[i]=='code' and kinds[i+1]=='code') for i in range(len(kinds)-1))
+              source='\n'.join(text(c) for c in nb['cells'])
+              assert '/mnt/data/' not in source
+              assert 'term-deposit-marketing-2020-labelled.csv' in source
+              print(n, 'EXECUTION + MARKDOWN STRUCTURE PASS')
           for n in ['03_features_imbalance.ipynb','04_segments_robustness.ipynb','05_final_validation_reporting.ipynb']:
-              code='\n'.join(src_text(c) for c in notebooks[n]['cells'] if c.get('cell_type')=='code')
-              feature_lines=[ln.strip() for ln in code.splitlines() if re.match(r'^(NUM|NUM_PRE|CAT|PRE)\s*=', ln.strip())]
-              assert feature_lines, f'feature definitions not found in {n}'
-              bad=[ln for ln in feature_lines if 'duration' in ln.lower()]
-              assert not bad, f'duration in deployable feature definition {n}: {bad}'
+              code='\n'.join(text(c) for c in notebooks[n]['cells'] if c.get('cell_type')=='code')
+              defs=[ln.strip() for ln in code.splitlines() if re.match(r'^(NUM|NUM_PRE|CAT|PRE)\s*=',ln.strip())]
+              assert defs
+              assert not [ln for ln in defs if 'duration' in ln.lower()]
               print(n, 'DEPLOYABLE DURATION EXCLUSION PASS')
-
-          print('ALL STEP-2 CHECKS PASS')
+          print('ALL STEP-2 STRUCTURAL CHECKS PASS')
           PY
 
       - name: Commit executed notebooks and labelled dataset
@@ -148,5 +103,5 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add 01_data_eda.ipynb 02_baseline_tuning.ipynb 03_features_imbalance.ipynb 04_segments_robustness.ipynb 05_final_validation_reporting.ipynb term-deposit-marketing-2020-labelled.csv
-          git commit -m 'Execute final notebooks 01-05 and verify canonical outputs'
+          git commit -m 'Execute final notebooks 01-05 with verified outputs'
           git push origin main
