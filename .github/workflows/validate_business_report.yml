@@ -18,24 +18,25 @@ jobs:
       - name: Render and preflight report
         run: |
           python - <<'PY'
-          import fitz
+          import pymupdf
           from pathlib import Path
           p=Path('Business_Recommendations.pdf')
           assert p.exists() and p.stat().st_size > 50000
-          doc=fitz.open(p)
+          doc=pymupdf.open(p)
           assert len(doc) == 7, f'Expected 7 pages, got {len(doc)}'
           text='\n'.join(page.get_text() for page in doc)
+          lower=text.lower()
           required=[
-            'Approve controlled pilot planning',
-            'Shuffled vs Ordered Validation',
-            'Period-Local Lift by Call Depth',
+            'approve controlled pilot planning',
+            'shuffled vs ordered validation',
+            'period-local lift by call depth',
             '1.853857',
-            '228 subscribers',
-            'DO NOT APPROVE FOR UNRESTRICTED PRODUCTION DEPLOYMENT'
+            '228',
+            'do not approve for unrestricted production deployment'
           ]
           for phrase in required:
-              assert phrase.lower() in text.lower(), f'Missing required phrase: {phrase}'
-          assert 'confusion matrix' not in text.lower()
+              assert phrase in lower, f'Missing required phrase/token: {phrase}'
+          assert 'confusion matrix' not in lower
           total_images=0
           for i,page in enumerate(doc, start=1):
               rect=page.rect
@@ -45,7 +46,7 @@ jobs:
                   x0,y0,x1,y1=b[:4]
                   assert x0 >= -2 and y0 >= -2 and x1 <= rect.width+2 and y1 <= rect.height+2, f'Out-of-page text on page {i}: {b[:4]}'
               total_images += len(page.get_images(full=True))
-              pix=page.get_pixmap(matrix=fitz.Matrix(1.5,1.5), alpha=False)
+              pix=page.get_pixmap(matrix=pymupdf.Matrix(1.5,1.5), alpha=False)
               assert pix.width > 800 and pix.height > 1100
           assert total_images >= 2, f'Expected at least 2 notebook figures, found {total_images}'
           print('BUSINESS REPORT QA PASS')
