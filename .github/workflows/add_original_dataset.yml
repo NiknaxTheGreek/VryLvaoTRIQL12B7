@@ -1,0 +1,37 @@
+name: Add original source dataset
+
+on:
+  push:
+    paths:
+      - '.github/workflows/add_original_dataset.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  add-source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download and verify exact original dataset
+        run: |
+          curl -L --fail -o term-deposit-marketing-2020.csv https://raw.githubusercontent.com/afolga/apziva_ai_residency/main/project2/data/term-deposit-marketing-2020.csv
+          echo '396ba342763d906f7a764bd492a2763cad855f55d7671431bb64f16ca7e1c413  term-deposit-marketing-2020.csv' | sha256sum -c -
+          python - <<'PY'
+          import pandas as pd
+          df=pd.read_csv('term-deposit-marketing-2020.csv')
+          assert df.shape == (40000,14)
+          assert int((df.y=='yes').sum()) == 2896
+          assert int((df.y=='no').sum()) == 37104
+          assert 'y_binary' not in df.columns
+          print('Original dataset verified:', df.shape)
+          PY
+      - name: Commit original dataset
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add term-deposit-marketing-2020.csv
+          git commit -m 'Add verified original source dataset'
+          git push origin main
