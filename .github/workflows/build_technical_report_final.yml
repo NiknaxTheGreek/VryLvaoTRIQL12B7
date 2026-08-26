@@ -1,0 +1,119 @@
+name: Finalize technical report
+
+on:
+  push:
+    paths:
+      - '.github/workflows/build_technical_report_final.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt reportlab pillow lxml nbclient nbformat pymupdf
+
+      - name: Clean Notebook 3 report panels and execute
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import nbformat
+          from nbclient import NotebookClient
+          p=Path('03_features_imbalance.ipynb')
+          nbj=json.loads(p.read_text())
+          changed=0
+          for cell in nbj['cells']:
+              if cell.get('cell_type')!='code':
+                  continue
+              lines=cell.get('source',[])
+              for i,line in enumerate(lines):
+                  if 'Feature Reduction — Six-Metric Holdout Comparison' in line:
+                      lines[i]='handles,labels=axes[0].get_legend_handles_labels(); fig.suptitle("Feature Reduction - Six-Metric Holdout Comparison",y=0.995); fig.legend(handles,labels,loc="upper center",bbox_to_anchor=(0.5,0.955),ncol=2,frameon=False); fig.tight_layout(rect=[0,0,1,0.91]); plt.show()\n'
+                      changed+=1
+                  elif 'Class-Imbalance Strategies — Six-Metric Holdout Comparison' in line:
+                      lines[i]='handles,labels=axes[0].get_legend_handles_labels(); fig.suptitle("Class-Imbalance Strategies - Six-Metric Holdout Comparison",y=0.995); fig.legend(handles,labels,loc="upper center",bbox_to_anchor=(0.5,0.955),ncol=2,frameon=False); fig.tight_layout(rect=[0,0,1,0.91]); plt.show()\n'
+                      changed+=1
+              cell['source']=lines
+          if changed!=2:
+              raise RuntimeError(f'Expected 2 panel edits, applied {changed}')
+          p.write_text(json.dumps(nbj,indent=1))
+          nb=nbformat.read(p,as_version=4)
+          out=NotebookClient(nb,timeout=600,kernel_name='python3',allow_errors=False).execute(cwd='.')
+          nbformat.write(out,p)
+          print('Notebook 3 execution PASS')
+          PY
+
+      - name: Recover and make tested report builder cell-index independent
+        run: |
+          python - <<'PY'
+          import base64,gzip,re
+          from pathlib import Path
+          workflow=Path('.github/workflows/build_technical_report.yml').read_text()
+          m=re.search(r"b64 = '''([A-Za-z0-9+/=]+)'''",workflow)
+          if not m:
+              raise RuntimeError('Embedded builder payload not found')
+          target=Path('/tmp/build_technical_report.py')
+          target.write_bytes(gzip.decompress(base64.b64decode(m.group(1))))
+          src=target.read_text()
+          replacements={
+              "F/'01_cell14_fig4.png'":"next(F.glob('01_cell*_fig4.png'))",
+              "F/'01_cell12_fig3.png'":"next(F.glob('01_cell*_fig3.png'))",
+              "F/'02_cell16_fig1.png'":"next(F.glob('02_cell*_fig1.png'))",
+              "F/'03_cell10_fig1.png'":"next(F.glob('03_cell*_fig1.png'))",
+              "F/'03_cell14_fig2.png'":"next(F.glob('03_cell*_fig2.png'))",
+              "F/'04_cell18_fig4.png'":"next(F.glob('04_cell*_fig4.png'))",
+              "F/'04_cell16_fig3.png'":"next(F.glob('04_cell*_fig3.png'))",
+              "F/'05_cell10_fig2.png'":"next(F.glob('05_cell*_fig2.png'))",
+              "F/'05_cell6_fig1.png'":"next(F.glob('05_cell*_fig1.png'))",
+          }
+          for old,new in replacements.items():
+              if old not in src:
+                  raise RuntimeError(f'Builder reference not found: {old}')
+              src=src.replace(old,new)
+          target.write_text(src)
+          print('Builder restored and normalized:',target.stat().st_size,'bytes')
+          PY
+
+      - name: Build and preflight Technical Report
+        run: |
+          python /tmp/build_technical_report.py
+          python - <<'PY'
+          from pathlib import Path
+          import fitz
+          p=Path('Technical_Report.pdf')
+          if not p.exists() or p.stat().st_size<200000:
+              raise RuntimeError('Technical report missing or unexpectedly small')
+          doc=fitz.open(p)
+          if len(doc)<15:
+              raise RuntimeError(f'Unexpected page count: {len(doc)}')
+          text='\n'.join(page.get_text() for page in doc)
+          for term in ['1.853857','0.566290','0.551600','Shuffled vs Ordered Validation','candidate configurations']:
+              if term not in text:
+                  raise RuntimeError(f'Missing required report evidence: {term}')
+          if 'Confusion Matrix' in text:
+              raise RuntimeError('Stale confusion-matrix content found')
+          print('Technical report preflight PASS:',len(doc),'pages,',p.stat().st_size,'bytes')
+          PY
+
+      - name: Commit final Notebook 3 and Technical Report
+        run: |
+          rm -rf _tech_figures_tmp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add 03_features_imbalance.ipynb Technical_Report.pdf
+          git commit -m 'Finalize technical report and report-facing notebook figures'
+          git push origin HEAD:main
