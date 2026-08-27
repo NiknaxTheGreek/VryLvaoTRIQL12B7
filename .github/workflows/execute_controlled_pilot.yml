@@ -1,0 +1,65 @@
+name: Execute controlled pilot preparation
+
+on:
+  push:
+    branches: [prospective-pilot]
+    paths:
+      - '.github/workflows/execute_controlled_pilot.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  execute-pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: prospective-pilot
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - name: Install pinned environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Execute pilot preparation notebook
+        run: |
+          jupyter nbconvert --to notebook --execute --inplace 06_controlled_pilot.ipynb \
+            --ExecutePreprocessor.timeout=900 \
+            --ExecutePreprocessor.kernel_name=python3
+      - name: Verify notebook and no fabricated live result
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('06_controlled_pilot.ipynb')
+          nb=json.loads(p.read_text())
+          code=[c for c in nb['cells'] if c.get('cell_type')=='code']
+          assert code and all(c.get('execution_count') is not None for c in code)
+          assert not [o for c in code for o in c.get('outputs',[]) if o.get('output_type')=='error']
+          whole=json.dumps(nb)
+          for token in [
+              'Primary policy: all-12 unweighted Logistic Regression',
+              'Historical base rate:',
+              'READY / WAITING FOR LIVE INPUT: pilot_eligible_customers.csv is not present.',
+              'No prospective assignment or result has been fabricated.'
+          ]:
+              assert token in whole, token
+          src='\n'.join(''.join(c.get('source',[])) for c in nb['cells'])
+          assert '"duration" not in PRE' in src
+          assert 'C=8.483428982440726' in src
+          assert 'max_iter=3000' in src
+          print('Controlled pilot preparation verification: PASS')
+          PY
+      - name: Commit executed notebook and cleanup workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/execute_controlled_pilot.yml
+          git add 06_controlled_pilot.ipynb
+          git commit -m "Execute controlled pilot preparation notebook"
+          git push origin prospective-pilot
