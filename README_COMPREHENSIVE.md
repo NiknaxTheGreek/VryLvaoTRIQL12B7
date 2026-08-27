@@ -359,15 +359,15 @@ The final pilot recommendation is:
 
 LR is not chosen because it wins every historical metric. It does not. HGB has stronger shuffled PR-AUC and ROC-AUC. LR is chosen because the model-selection decision incorporates later-block ordered robustness, period-local historical lift, transparency, monitoring simplicity, limited benefit from additional imbalance complexity and the need for a conservative controlled pilot rather than immediate production rollout.
 
-## 16. Controlled Pilot Design
+## 16. Controlled Pilot Design and Implementation
 
-The next business step is a prospective test, not further retrospective score polishing.
+The next business step is a prospective test, not further retrospective score polishing. The repository now implements that preparation explicitly in `06_controlled_pilot.ipynb`, with `PILOT_PROTOCOL.md` as the frozen operational protocol.
 
-A suitable pilot compares **equal calling capacity** across a model-ranked LR arm and a business-as-usual or random comparator arm, with an optional HGB challenger arm if operational capacity allows.
+The implementation refits the frozen all-12 LR specification on all historical training rows for live scoring, retains HGB as an optional challenger, rejects `duration` and outcome columns before assignment, validates a unique `customer_id` plus the 12 pre-call fields, performs deterministic score-stratified randomisation, and enforces equal calling capacity across policy arms. A bank BAU priority can be used for control; otherwise a random control is supported.
 
-The primary business outcome should be **subscriptions per 1,000 assigned calls**. Useful secondary measures include contactability, opt-outs, complaints, repeat contacts, customer mix and agent time where available.
+The primary business outcome is **subscriptions per 1,000 assigned calls**. The outcome-analysis functions calculate absolute rate difference, relative lift and a bootstrap confidence interval versus control. Sample-size planning and economic-value functions are included, but the bank must supply the minimum worthwhile effect, actual calling cost and net contribution per subscription.
 
-The pilot should predefine stop/go criteria and avoid interpreting retrospective ranking lift as causal uplift from deployment.
+The notebook has been executed successfully without live input. It correctly ends in a **READY / WAITING FOR LIVE INPUT** state because a real prospective experiment cannot be reconstructed from historical outcomes. No causal pilot result is fabricated.
 
 ## 17. Economics
 
@@ -417,8 +417,10 @@ Every analytical result used in the final project should be traceable to an exec
 | Shuffled vs Ordered Validation figure | `04_segments_robustness.ipynb` | Report-facing model-selection comparison |
 | Period-local lift table and figure | `05_final_validation_reporting.ipynb` | Business call-depth evidence |
 | Calibration table and reliability figure | `05_final_validation_reporting.ipynb` | Score reliability diagnostic |
+| Frozen pilot models, leakage guard, randomisation, equal-capacity selection, sample-size/economic functions and readiness status | `06_controlled_pilot.ipynb` | Prospective pilot implementation |
+| Experimental protocol, live-input contract, primary/secondary outcomes, economics and go/no-go rules | `PILOT_PROTOCOL.md` | Prospective pilot governance |
 
-All five notebooks contain explanatory Markdown between substantive code stages so the calculation sequence, rationale and interpretation remain visible alongside the executable analysis.
+All five retrospective analytical notebooks contain explanatory Markdown between substantive code stages. Notebook 06 is also executed and documented, but its outputs are preparation/readiness outputs rather than prospective effectiveness results because no new live campaign data are available.
 
 ## 20. Repository Structure
 
@@ -430,7 +432,9 @@ The project repository is intentionally **flat**. It contains no project folders
 03_features_imbalance.ipynb
 04_segments_robustness.ipynb
 05_final_validation_reporting.ipynb
+06_controlled_pilot.ipynb
 Business_Recommendations.pdf
+PILOT_PROTOCOL.md
 README.md
 README_COMPREHENSIVE.md
 Technical_Report.pdf
@@ -457,12 +461,13 @@ Then execute the notebooks in order:
 03_features_imbalance.ipynb
 04_segments_robustness.ipynb
 05_final_validation_reporting.ipynb
+06_controlled_pilot.ipynb
 ```
 
-The notebooks read `term-deposit-marketing-2020-labelled.csv` directly from the repository root. They require no auxiliary project directories and no cached CSV, JSON or NPY intermediates.
+The first five notebooks read `term-deposit-marketing-2020-labelled.csv` directly from the repository root. Notebook 06 uses the same historical file to refit the frozen scoring models and, when available, expects a separate root-level `pilot_eligible_customers.csv` containing only a unique customer identifier and the 12 pre-call predictors. With no live file present it executes to readiness status. The repository requires no auxiliary project directories and no cached CSV, JSON or NPY intermediates.
 
 The pinned environment is recorded in `requirements.txt` so the deterministic splits, seeded candidate sampling and fitted implementations can be reproduced as closely as possible.
 
 ## 22. Project Decision in One Sentence
 
-**The historical evidence supports testing an all-12 unweighted Logistic Regression ranking system in a controlled live pilot, with HGB retained as a challenger, because LR is more robust under the stricter ordered validation and produces the strongest historical call-depth lift even though HGB wins conventional shuffled validation.**
+**The historical evidence supports testing an all-12 unweighted Logistic Regression ranking system in a controlled live pilot, with HGB retained as a challenger, because LR is more robust under the stricter ordered validation and produces the strongest historical call-depth lift even though HGB wins conventional shuffled validation. The repository now includes the executable pilot-preparation workflow and frozen protocol; only genuinely new bank data can supply the remaining prospective result.**

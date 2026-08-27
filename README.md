@@ -47,15 +47,16 @@ The data contain month labels but no verified year, campaign identifier or trust
 
 ## Analytical Workflow
 
-The five executed notebooks form the analytical source of truth:
+The first five executed notebooks form the retrospective analytical source of truth. A sixth executed notebook implements the prospective pilot preparation without inventing live outcomes:
 
 1. `01_data_eda.ipynb` — data quality, class balance, associations, ordered blocks and descriptive higher-conversion population.
 2. `02_baseline_tuning.ipynb` — baseline/default LR/HGB, leakage comparison, deterministic tuning and untouched holdout evaluation.
 3. `03_features_imbalance.ipynb` — feature importance, feature reduction, imbalance strategies and threshold diagnostics.
 4. `04_segments_robustness.ipynb` — exploratory population validation, shuffled validation, pseudo-profile grouped sensitivity and expanding-window ordered validation.
 5. `05_final_validation_reporting.ipynb` — period-local lift, calibration diagnostics and final reporting summaries.
+6. `06_controlled_pilot.ipynb` — freezes the final LR/HGB pilot specifications, validates live-input schema, enforces the `duration` leakage guard, provides deterministic randomisation/equal-capacity assignment, sample-size planning, outcome analysis and economics. Without a genuinely new eligible-customer file it executes to a **READY / WAITING FOR LIVE INPUT** state and reports no fabricated pilot outcome.
 
-All notebooks use `SEED=42`, contain explanatory Markdown between substantive code stages, read the root-level labelled dataset directly and do **not** depend on generated folders or cached result files.
+The five retrospective analytical notebooks use `SEED=42`; the pilot notebook uses the frozen model seed plus a separate fixed pilot-randomisation seed. All contain explanatory Markdown, use root-level inputs and do **not** depend on generated folders or cached result files.
 
 ## Is the selection of Logistic Regression and HistGradientBoosting justified?
 
@@ -178,6 +179,12 @@ No sigmoid or isotonic recalibration model is fitted. Period-local quantile bins
 
 At 5% depth, LR makes **1,528 calls** and captures **228 subscribers**, versus approximately **122.99 expected under random selection** at the same volume. These call depths are sensitivity points, not prescribed quotas.
 
+## Controlled Prospective Pilot Implementation
+
+The recommended next step has been implemented as an executable preparation layer rather than left as prose only. `06_controlled_pilot.ipynb` and `PILOT_PROTOCOL.md` freeze the selected all-12 LR model, retain HGB as an optional challenger, prohibit `duration` and outcome fields at assignment time, validate a genuinely new eligible-customer snapshot, randomise policy pools, enforce equal call capacity, define subscriptions per 1,000 assigned calls as the primary outcome, provide confidence-interval and sample-size functions, and calculate economics once the bank supplies real cost and contribution inputs.
+
+The pilot-preparation notebook has been executed successfully in the pinned environment. Because no genuinely new bank customer snapshot or prospective outcomes are present in the repository, it correctly terminates in a **READY / WAITING FOR LIVE INPUT** state. This adds implementation readiness but **does not change or manufacture any retrospective model result**.
+
 ## Final Recommendation
 
 Use **unweighted all-12 Logistic Regression** as the primary candidate in a controlled live pilot and keep HGB as a challenger.
@@ -196,7 +203,9 @@ The repository is intentionally **flat: no folders and no HTML exports**.
 03_features_imbalance.ipynb
 04_segments_robustness.ipynb
 05_final_validation_reporting.ipynb
+06_controlled_pilot.ipynb
 Business_Recommendations.pdf
+PILOT_PROTOCOL.md
 README.md
 README_COMPREHENSIVE.md
 Technical_Report.pdf
@@ -210,6 +219,8 @@ term-deposit-marketing-2020-labelled.csv
 - `Technical_Report.pdf` — detailed technical methodology, results and limitations.
 - `Business_Recommendations.pdf` — concise decision-oriented interpretation and controlled-pilot recommendation.
 - `README_COMPREHENSIVE.md` — extended methodology, result interpretation and notebook traceability.
+- `PILOT_PROTOCOL.md` — frozen prospective experimental protocol, operational data contract, guardrails and go/no-go logic.
+- `06_controlled_pilot.ipynb` — executed pilot-preparation implementation; no live result is fabricated when fresh bank data are absent.
 
 ## Reproducibility
 
@@ -222,10 +233,11 @@ jupyter nbconvert --to notebook --execute --inplace 02_baseline_tuning.ipynb --E
 jupyter nbconvert --to notebook --execute --inplace 03_features_imbalance.ipynb --ExecutePreprocessor.timeout=900
 jupyter nbconvert --to notebook --execute --inplace 04_segments_robustness.ipynb --ExecutePreprocessor.timeout=900
 jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=900
+jupyter nbconvert --to notebook --execute --inplace 06_controlled_pilot.ipynb --ExecutePreprocessor.timeout=900
 ```
 
-The commands execute the notebooks sequentially from `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb`. The analytical notebooks do not require generated folders or intermediate result files.
+The commands execute the five retrospective analytical notebooks and then the pilot-preparation notebook. In the absence of `pilot_eligible_customers.csv`, Notebook 06 deliberately reports readiness/waiting status rather than producing a fake prospective result. No generated folders or intermediate result files are required.
 
 ## Key Limitation
 
-The strongest limitation is temporal robustness. The ordered blocks preserve source order but are **not verified campaign timestamps**, and performance is substantially weaker than under shuffled validation. The project therefore supports **controlled pilot planning**, not an unconditional claim of production readiness.
+The strongest limitation is temporal robustness. The ordered blocks preserve source order but are **not verified campaign timestamps**, and performance is substantially weaker than under shuffled validation. The repository now includes the complete controlled-pilot preparation protocol and executable implementation, but actual prospective effectiveness, economics and recalibration remain unknowable until genuinely new bank campaign data and outcomes are supplied. The project therefore supports **controlled pilot execution**, not an unconditional claim of production readiness.
