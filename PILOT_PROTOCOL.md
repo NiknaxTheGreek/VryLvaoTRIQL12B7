@@ -137,15 +137,14 @@ The pre-call feature snapshot must not be overwritten by later customer-data upd
 
 ## Primary analysis
 
-The primary comparison is intention-to-treat by assigned policy.
+The primary comparison is between customers actually assigned a call under each randomised policy pool, using equal call capacity.
 
 Headline measure:
 
-**subscriptions per 1,000 assigned customers/calls**
+**subscriptions per 1,000 assigned calls**
 
 For each arm calculate:
 
-- assigned customers;
 - assigned calls;
 - subscriptions;
 - subscription rate;
