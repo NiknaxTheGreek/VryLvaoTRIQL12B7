@@ -1,0 +1,108 @@
+name: Finalize pilot documentation
+
+on:
+  push:
+    branches: [prospective-pilot]
+    paths:
+      - '.github/workflows/finalize_pilot_docs.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  finalize-docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: prospective-pilot
+          fetch-depth: 0
+      - name: Update README files for completed pilot-preparation package
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p=Path('README.md')
+          t=p.read_text()
+          t=t.replace(
+          'The five executed notebooks form the analytical source of truth:',
+          'The first five executed notebooks form the retrospective analytical source of truth. A sixth executed notebook implements the prospective pilot preparation without inventing live outcomes:'
+          )
+          t=t.replace(
+          '5. `05_final_validation_reporting.ipynb` — period-local lift, calibration diagnostics and final reporting summaries.\n\nAll notebooks use `SEED=42`, contain explanatory Markdown between substantive code stages, read the root-level labelled dataset directly and do **not** depend on generated folders or cached result files.',
+          '5. `05_final_validation_reporting.ipynb` — period-local lift, calibration diagnostics and final reporting summaries.\n6. `06_controlled_pilot.ipynb` — freezes the final LR/HGB pilot specifications, validates live-input schema, enforces the `duration` leakage guard, provides deterministic randomisation/equal-capacity assignment, sample-size planning, outcome analysis and economics. Without a genuinely new eligible-customer file it executes to a **READY / WAITING FOR LIVE INPUT** state and reports no fabricated pilot outcome.\n\nThe five retrospective analytical notebooks use `SEED=42`; the pilot notebook uses the frozen model seed plus a separate fixed pilot-randomisation seed. All contain explanatory Markdown, use root-level inputs and do **not** depend on generated folders or cached result files.'
+          )
+          marker='## Final Recommendation\n\nUse **unweighted all-12 Logistic Regression** as the primary candidate in a controlled live pilot and keep HGB as a challenger.'
+          replacement='''## Controlled Prospective Pilot Implementation\n\nThe recommended next step has been implemented as an executable preparation layer rather than left as prose only. `06_controlled_pilot.ipynb` and `PILOT_PROTOCOL.md` freeze the selected all-12 LR model, retain HGB as an optional challenger, prohibit `duration` and outcome fields at assignment time, validate a genuinely new eligible-customer snapshot, randomise policy pools, enforce equal call capacity, define subscriptions per 1,000 assigned calls as the primary outcome, provide confidence-interval and sample-size functions, and calculate economics once the bank supplies real cost and contribution inputs.\n\nThe pilot-preparation notebook has been executed successfully in the pinned environment. Because no genuinely new bank customer snapshot or prospective outcomes are present in the repository, it correctly terminates in a **READY / WAITING FOR LIVE INPUT** state. This adds implementation readiness but **does not change or manufacture any retrospective model result**.\n\n## Final Recommendation\n\nUse **unweighted all-12 Logistic Regression** as the primary candidate in a controlled live pilot and keep HGB as a challenger.'''
+          assert marker in t
+          t=t.replace(marker,replacement)
+          t=t.replace(
+          '05_final_validation_reporting.ipynb\nBusiness_Recommendations.pdf',
+          '05_final_validation_reporting.ipynb\n06_controlled_pilot.ipynb\nBusiness_Recommendations.pdf\nPILOT_PROTOCOL.md'
+          )
+          t=t.replace(
+          '- `README_COMPREHENSIVE.md` — extended methodology, result interpretation and notebook traceability.',
+          '- `README_COMPREHENSIVE.md` — extended methodology, result interpretation and notebook traceability.\n- `PILOT_PROTOCOL.md` — frozen prospective experimental protocol, operational data contract, guardrails and go/no-go logic.\n- `06_controlled_pilot.ipynb` — executed pilot-preparation implementation; no live result is fabricated when fresh bank data are absent.'
+          )
+          t=t.replace(
+          'jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=900\n```\n\nThe commands execute the notebooks sequentially from `01_data_eda.ipynb` through `05_final_validation_reporting.ipynb`. The analytical notebooks do not require generated folders or intermediate result files.',
+          'jupyter nbconvert --to notebook --execute --inplace 05_final_validation_reporting.ipynb --ExecutePreprocessor.timeout=900\njupyter nbconvert --to notebook --execute --inplace 06_controlled_pilot.ipynb --ExecutePreprocessor.timeout=900\n```\n\nThe commands execute the five retrospective analytical notebooks and then the pilot-preparation notebook. In the absence of `pilot_eligible_customers.csv`, Notebook 06 deliberately reports readiness/waiting status rather than producing a fake prospective result. No generated folders or intermediate result files are required.'
+          )
+          t=t.replace(
+          'The strongest limitation is temporal robustness. The ordered blocks preserve source order but are **not verified campaign timestamps**, and performance is substantially weaker than under shuffled validation. The project therefore supports **controlled pilot planning**, not an unconditional claim of production readiness.',
+          'The strongest limitation is temporal robustness. The ordered blocks preserve source order but are **not verified campaign timestamps**, and performance is substantially weaker than under shuffled validation. The repository now includes the complete controlled-pilot preparation protocol and executable implementation, but actual prospective effectiveness, economics and recalibration remain unknowable until genuinely new bank campaign data and outcomes are supplied. The project therefore supports **controlled pilot execution**, not an unconditional claim of production readiness.'
+          )
+          p.write_text(t)
+
+          p=Path('README_COMPREHENSIVE.md')
+          t=p.read_text()
+          t=t.replace(
+          '## 16. Controlled Pilot Design\n\nThe next business step is a prospective test, not further retrospective score polishing.\n\nA suitable pilot compares **equal calling capacity** across a model-ranked LR arm and a business-as-usual or random comparator arm, with an optional HGB challenger arm if operational capacity allows.\n\nThe primary business outcome should be **subscriptions per 1,000 assigned calls**. Useful secondary measures include contactability, opt-outs, complaints, repeat contacts, customer mix and agent time where available.\n\nThe pilot should predefine stop/go criteria and avoid interpreting retrospective ranking lift as causal uplift from deployment.',
+          '''## 16. Controlled Pilot Design and Implementation\n\nThe next business step is a prospective test, not further retrospective score polishing. The repository now implements that preparation explicitly in `06_controlled_pilot.ipynb`, with `PILOT_PROTOCOL.md` as the frozen operational protocol.\n\nThe implementation refits the frozen all-12 LR specification on all historical training rows for live scoring, retains HGB as an optional challenger, rejects `duration` and outcome columns before assignment, validates a unique `customer_id` plus the 12 pre-call fields, performs deterministic score-stratified randomisation, and enforces equal calling capacity across policy arms. A bank BAU priority can be used for control; otherwise a random control is supported.\n\nThe primary business outcome is **subscriptions per 1,000 assigned calls**. The outcome-analysis functions calculate absolute rate difference, relative lift and a bootstrap confidence interval versus control. Sample-size planning and economic-value functions are included, but the bank must supply the minimum worthwhile effect, actual calling cost and net contribution per subscription.\n\nThe notebook has been executed successfully without live input. It correctly ends in a **READY / WAITING FOR LIVE INPUT** state because a real prospective experiment cannot be reconstructed from historical outcomes. No causal pilot result is fabricated.'''
+          )
+          t=t.replace(
+          '| Calibration table and reliability figure | `05_final_validation_reporting.ipynb` | Score reliability diagnostic |',
+          '| Calibration table and reliability figure | `05_final_validation_reporting.ipynb` | Score reliability diagnostic |\n| Frozen pilot models, leakage guard, randomisation, equal-capacity selection, sample-size/economic functions and readiness status | `06_controlled_pilot.ipynb` | Prospective pilot implementation |\n| Experimental protocol, live-input contract, primary/secondary outcomes, economics and go/no-go rules | `PILOT_PROTOCOL.md` | Prospective pilot governance |'
+          )
+          t=t.replace(
+          'All five notebooks contain explanatory Markdown between substantive code stages so the calculation sequence, rationale and interpretation remain visible alongside the executable analysis.',
+          'All five retrospective analytical notebooks contain explanatory Markdown between substantive code stages. Notebook 06 is also executed and documented, but its outputs are preparation/readiness outputs rather than prospective effectiveness results because no new live campaign data are available.'
+          )
+          t=t.replace(
+          '05_final_validation_reporting.ipynb\nBusiness_Recommendations.pdf',
+          '05_final_validation_reporting.ipynb\n06_controlled_pilot.ipynb\nBusiness_Recommendations.pdf\nPILOT_PROTOCOL.md'
+          )
+          t=t.replace(
+          '05_final_validation_reporting.ipynb\n```\n\nThe notebooks read `term-deposit-marketing-2020-labelled.csv` directly from the repository root. They require no auxiliary project directories and no cached CSV, JSON or NPY intermediates.',
+          '05_final_validation_reporting.ipynb\n06_controlled_pilot.ipynb\n```\n\nThe first five notebooks read `term-deposit-marketing-2020-labelled.csv` directly from the repository root. Notebook 06 uses the same historical file to refit the frozen scoring models and, when available, expects a separate root-level `pilot_eligible_customers.csv` containing only a unique customer identifier and the 12 pre-call predictors. With no live file present it executes to readiness status. The repository requires no auxiliary project directories and no cached CSV, JSON or NPY intermediates.'
+          )
+          t=t.replace(
+          '## 22. Project Decision in One Sentence\n\n**The historical evidence supports testing an all-12 unweighted Logistic Regression ranking system in a controlled live pilot, with HGB retained as a challenger, because LR is more robust under the stricter ordered validation and produces the strongest historical call-depth lift even though HGB wins conventional shuffled validation.**',
+          '## 22. Project Decision in One Sentence\n\n**The historical evidence supports testing an all-12 unweighted Logistic Regression ranking system in a controlled live pilot, with HGB retained as a challenger, because LR is more robust under the stricter ordered validation and produces the strongest historical call-depth lift even though HGB wins conventional shuffled validation. The repository now includes the executable pilot-preparation workflow and frozen protocol; only genuinely new bank data can supply the remaining prospective result.**'
+          )
+          p.write_text(t)
+          PY
+      - name: Verify documentation and flat structure
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          r=Path('README.md').read_text()
+          c=Path('README_COMPREHENSIVE.md').read_text()
+          for text in (r,c):
+              assert '06_controlled_pilot.ipynb' in text
+              assert 'PILOT_PROTOCOL.md' in text
+              assert 'READY / WAITING FOR LIVE INPUT' in text
+          paths=[p for p in Path('.').iterdir() if p.name != '.git']
+          # workflow still exists until the commit step; no other directories allowed.
+          unexpected=[p for p in paths if p.is_dir() and p.name != '.github']
+          assert not unexpected, unexpected
+          print('Pilot documentation verification: PASS')
+          PY
+      - name: Commit final documentation and cleanup workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm -f .github/workflows/finalize_pilot_docs.yml
+          git add README.md README_COMPREHENSIVE.md
+          git commit -m "Complete prospective pilot preparation documentation"
+          git push origin prospective-pilot
